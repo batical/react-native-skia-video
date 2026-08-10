@@ -6,15 +6,32 @@
 //
 
 #import "VideoFrame.h"
+#import "MTLTextureUtils.h"
 
 namespace RNSkiaVideo {
 
-VideoFrame::VideoFrame(id<MTLTexture> mtlTexture, double width, double height,
-                       int rotation) {
-  this->mtlTexture = mtlTexture;
+VideoFrame::VideoFrame(CVPixelBufferRef pixelBuffer, double width,
+                       double height, int rotation) {
+  this->pixelBuffer = CVPixelBufferRetain(pixelBuffer);
+  this->cvMetalTexture =
+      [MTLTextureUtils createTextureViewForPixelBuffer:pixelBuffer];
+  this->mtlTexture =
+      cvMetalTexture ? CVMetalTextureGetTexture(cvMetalTexture) : nil;
   this->width = width;
   this->height = height;
   this->rotation = rotation;
+}
+
+VideoFrame::~VideoFrame() {
+  mtlTexture = nil;
+  if (cvMetalTexture) {
+    CFRelease(cvMetalTexture);
+    cvMetalTexture = NULL;
+  }
+  if (pixelBuffer) {
+    CVPixelBufferRelease(pixelBuffer);
+    pixelBuffer = NULL;
+  }
 }
 
 std::vector<jsi::PropNameID> VideoFrame::getPropertyNames(jsi::Runtime& rt) {
