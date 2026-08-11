@@ -35,6 +35,9 @@ private:
   std::list<std::pair<double, CMSampleBufferRef>> nextLoopFrames;
   CMTime lastRequestedTime = kCMTimeInvalid;
   std::shared_ptr<VideoFrame> currentFrame;
+  // Recently issued frames; the oldest gets its buffer released as newer
+  // ones are issued, so lifetime never depends on the JS garbage collector.
+  std::list<std::shared_ptr<VideoFrame>> issuedFrames;
 
   void setupReader(CMTime initialTime);
   double mapSourceTimeToTarget(CMTime sourceTime);

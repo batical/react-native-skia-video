@@ -23,6 +23,11 @@ VideoFrame::VideoFrame(CVPixelBufferRef pixelBuffer, double width,
 }
 
 VideoFrame::~VideoFrame() {
+  releaseBuffer();
+}
+
+void VideoFrame::releaseBuffer() {
+  std::lock_guard<std::mutex> guard(mutex);
   mtlTexture = nil;
   if (cvMetalTexture) {
     CFRelease(cvMetalTexture);
@@ -53,6 +58,7 @@ jsi::Value VideoFrame::get(jsi::Runtime& runtime,
   } else if (propName == "rotation") {
     return jsi::Value(rotation);
   } else if (propName == "texture") {
+    std::lock_guard<std::mutex> guard(mutex);
     if (mtlTexture) {
       auto object = jsi::Object(runtime);
       auto pointer = jsi::BigInt::fromUint64(

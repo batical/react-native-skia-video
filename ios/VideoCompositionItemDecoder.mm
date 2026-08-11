@@ -222,6 +222,15 @@ VideoCompositionItemDecoder::acquireFrameForTime(CMTime currentTime,
     CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(nextFrame);
     auto frame = std::make_shared<VideoFrame>(buffer, width, height, rotation);
     CFRelease(nextFrame);
+    // Deterministic lifetime: keep the last few issued frames alive (the
+    // GPU may still sample the previous ones for a tick or two), release
+    // the buffer of anything older. Stale JS wrappers see an undefined
+    // texture instead of pinning a decoder buffer until garbage collection.
+    issuedFrames.push_back(frame);
+    while (issuedFrames.size() > 3) {
+      issuedFrames.front()->releaseBuffer();
+      issuedFrames.pop_front();
+    }
     return frame;
   }
   return nullptr;
@@ -248,6 +257,10 @@ void VideoCompositionItemDecoder::release() {
       CFRelease(frame.second);
     }
     nextLoopFrames.clear();
+    for (const auto& frame : issuedFrames) {
+      frame->releaseBuffer();
+    }
+    issuedFrames.clear();
     hasLooped = false;
     lastRequestedTime = kCMTimeInvalid;
     currentFrame = nullptr;

@@ -66,6 +66,13 @@ jsi::Value VideoPlayerHostObject::get(jsi::Runtime& runtime,
           currentFrame =
               std::make_shared<VideoFrame>(buffer, width, height, rotation);
           CVPixelBufferRelease(buffer);
+          // Deterministic lifetime: release the buffers of older frames
+          // instead of waiting for their JS wrappers to be collected.
+          issuedFrames.push_back(currentFrame);
+          while (issuedFrames.size() > 3) {
+            issuedFrames.front()->releaseBuffer();
+            issuedFrames.pop_front();
+          }
           return jsi::Object::createFromHostObject(runtime, currentFrame);
         });
   } else if (propName == "play") {
@@ -199,6 +206,10 @@ void VideoPlayerHostObject::readyToPlay(float width, float height,
 void VideoPlayerHostObject::release() {
   if (!released.test_and_set()) {
     removeAllListeners();
+    for (const auto& frame : issuedFrames) {
+      frame->releaseBuffer();
+    }
+    issuedFrames.clear();
     if (currentFrame) {
       currentFrame = nullptr;
     }
