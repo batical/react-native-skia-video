@@ -74,10 +74,15 @@ void VideoFrame::releaseBuffer() {
 void VideoFrameRing::push(const std::shared_ptr<VideoFrame>& frame) {
   std::lock_guard<std::mutex> guard(mutex);
   issuedFrames.push_back(frame);
-  while (issuedFrames.size() > kIssuedFrameRingDepth) {
+  bool retired = false;
+  while (issuedFrames.size() > depth) {
     issuedFrames.front()->releaseTexture();
     retiredFrames.push_back(issuedFrames.front());
     issuedFrames.pop_front();
+    retired = true;
+  }
+  if (!retired && retiredFrames.empty()) {
+    return;
   }
   // Let go of the cache's own references to the textures we just dropped:
   // while it holds them the surfaces stay alive whatever we do here, so

@@ -8,7 +8,12 @@ namespace RNSkiaVideo {
 
 VideoCompositionItemDecoder::VideoCompositionItemDecoder(
     std::shared_ptr<VideoCompositionItem> item, bool realTime,
-    AVURLAsset* sharedAsset) {
+    AVURLAsset* sharedAsset)
+    // The sync (export) consumer flushes the GPU before asking for the next
+    // frame, so retiring a frame the moment it is replaced is safe and keeps
+    // one decoded buffer alive per item instead of four — at 4K that is
+    // ~100MB less per item during an export.
+    : frameRing(realTime ? kPreviewFrameRingDepth : 1) {
   this->item = item;
   this->realTime = realTime;
   lock = [[NSObject alloc] init];

@@ -76,23 +76,42 @@ private:
 };
 
 /**
+ * Ring depth for real-time preview producers. The JS contract (see
+ * VideoFrame.texture in types.ts) is that a frame is consumed in the tick it
+ * is handed out, so the only reads that can outlive a frame's currency are
+ * GPU command buffers the preview's asynchronous flush left in flight.
+ * CAMetalLayer blocks the render loop past 3 drawables in flight, so
+ * maxDrawableCount + 1 issuances is as far as sampling can lag issuance.
+ */
+static constexpr size_t kPreviewFrameRingDepth = 4;
+
+/**
  * Bounds the lifetime of the zero-copy frames a producer (a composition item
  * decoder or the simple player) hands to JS, without depending on the JS
  * garbage collector to release them.
  *
- * Frames are retired in two stages. A frame older than `kIssuedFrameRingDepth`
- * issuances loses its texture view immediately, so no NEW sampling work can
- * reference it; its pixel buffer only goes back to the pool once the kernel
- * reports its IOSurface idle, so a buffer another subsystem still reads is
- * never recycled under it. The depth (maxDrawableCount + 1) is what actually
- * bounds how far the GPU can lag issuance, since CAMetalLayer blocks the
- * render loop past 3 drawables in flight. On the export path retiring is
- * provably safe either way: the export loop flushes synchronously
- * (surface.flush(true)), so sampling is complete before the next frame is
- * issued.
+ * Frames are retired in two stages. A frame older than `depth` issuances
+ * loses its texture view immediately, so no NEW sampling work can reference
+ * it; its pixel buffer only goes back to the pool once the kernel reports
+ * its IOSurface idle, so a buffer another subsystem still reads is never
+ * recycled under it. The in-use check cannot see command buffers Metal has
+ * merely queued, so the depth — not the check — is what actually covers
+ * in-flight GPU sampling.
  */
 class VideoFrameRing {
 public:
+  /**
+   * `depth` is how many recently issued frames stay fully alive: the
+   * consumer's sampling of a frame must provably be finished `depth`
+   * issuances after it was handed out. Preview producers use
+   * kPreviewFrameRingDepth; the sync (export) extractor uses 1, because its
+   * consumer flushes the GPU synchronously before requesting the next frame,
+   * making retirement-on-replacement safe and keeping a single decoded
+   * buffer per item instead of kPreviewFrameRingDepth of them.
+   */
+  explicit VideoFrameRing(size_t depth = kPreviewFrameRingDepth)
+      : depth(depth) {}
+
   /** Registers a freshly issued frame and runs a retirement pass. */
   void push(const std::shared_ptr<VideoFrame>& frame);
 
@@ -107,12 +126,12 @@ private:
   // Frames are issued from the render thread but a dispose can drop them from
   // the JS thread, so the lists below are guarded.
   std::mutex mutex;
+  size_t depth;
   /** Recently issued frames, kept fully alive. */
   std::list<std::shared_ptr<VideoFrame>> issuedFrames;
   /** Retired frames whose surface has not gone idle yet. */
   std::list<std::shared_ptr<VideoFrame>> retiredFrames;
 
-  static constexpr size_t kIssuedFrameRingDepth = 4;
   /**
    * Upper bound on retired frames awaiting their surface to go idle, so a
    * pathological consumer cannot pile buffers up. Force-releasing past this
