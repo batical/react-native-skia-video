@@ -7,6 +7,7 @@
 
 #import "VideoFrame.h"
 #import "MTLTextureUtils.h"
+#import <IOSurface/IOSurfaceRef.h>
 
 namespace RNSkiaVideo {
 
@@ -26,17 +27,48 @@ VideoFrame::~VideoFrame() {
   releaseBuffer();
 }
 
-void VideoFrame::releaseBuffer() {
-  std::lock_guard<std::mutex> guard(mutex);
+void VideoFrame::releaseTextureLocked() {
   mtlTexture = nil;
   if (cvMetalTexture) {
     CFRelease(cvMetalTexture);
     cvMetalTexture = NULL;
   }
+}
+
+void VideoFrame::releaseBufferLocked() {
+  releaseTextureLocked();
   if (pixelBuffer) {
     CVPixelBufferRelease(pixelBuffer);
     pixelBuffer = NULL;
   }
+}
+
+void VideoFrame::releaseTexture() {
+  std::lock_guard<std::mutex> guard(mutex);
+  releaseTextureLocked();
+}
+
+bool VideoFrame::tryReleaseBuffer() {
+  std::lock_guard<std::mutex> guard(mutex);
+  // Our own texture view must go first: it pins the surface's use count.
+  releaseTextureLocked();
+  if (!pixelBuffer) {
+    return true;
+  }
+  IOSurfaceRef surface = CVPixelBufferGetIOSurface(pixelBuffer);
+  if (surface && IOSurfaceIsInUse(surface)) {
+    // The GPU (or another consumer) still reads the surface: keep our
+    // retain so the pool cannot recycle it under pending sampling work.
+    return false;
+  }
+  CVPixelBufferRelease(pixelBuffer);
+  pixelBuffer = NULL;
+  return true;
+}
+
+void VideoFrame::releaseBuffer() {
+  std::lock_guard<std::mutex> guard(mutex);
+  releaseBufferLocked();
 }
 
 std::vector<jsi::PropNameID> VideoFrame::getPropertyNames(jsi::Runtime& rt) {

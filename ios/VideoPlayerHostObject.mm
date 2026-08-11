@@ -66,13 +66,25 @@ jsi::Value VideoPlayerHostObject::get(jsi::Runtime& runtime,
           currentFrame =
               std::make_shared<VideoFrame>(buffer, width, height, rotation);
           CVPixelBufferRelease(buffer);
-          // Deterministic lifetime: release the buffers of older frames
-          // instead of waiting for their JS wrappers to be collected (see
-          // kIssuedFrameRingDepth for why the depth bounds GPU sampling).
+          // Deterministic lifetime (see VideoFrame.h): retire frames older
+          // than the ring, return their buffer to the pool only once the
+          // kernel reports their IOSurface idle.
           issuedFrames.push_back(currentFrame);
           while (issuedFrames.size() > kIssuedFrameRingDepth) {
-            issuedFrames.front()->releaseBuffer();
+            issuedFrames.front()->releaseTexture();
+            retiredFrames.push_back(issuedFrames.front());
             issuedFrames.pop_front();
+          }
+          for (auto it = retiredFrames.begin(); it != retiredFrames.end();) {
+            if ((*it)->tryReleaseBuffer()) {
+              it = retiredFrames.erase(it);
+            } else {
+              ++it;
+            }
+          }
+          while (retiredFrames.size() > kRetiredFramesHardCap) {
+            retiredFrames.front()->releaseBuffer();
+            retiredFrames.pop_front();
           }
           return jsi::Object::createFromHostObject(runtime, currentFrame);
         });
@@ -211,6 +223,10 @@ void VideoPlayerHostObject::release() {
       frame->releaseBuffer();
     }
     issuedFrames.clear();
+    for (const auto& frame : retiredFrames) {
+      frame->releaseBuffer();
+    }
+    retiredFrames.clear();
     if (currentFrame) {
       currentFrame = nullptr;
     }

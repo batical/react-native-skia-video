@@ -35,9 +35,10 @@ private:
   RNSVVideoPlayer* player;
   RNSVSkiaVideoPlayerDelegateImpl* playerDelegate;
   std::shared_ptr<VideoFrame> currentFrame;
-  // Recently issued frames; the oldest gets its buffer released as newer
-  // ones are issued, so lifetime never depends on the JS garbage collector.
+  // Recently issued frames and retired frames awaiting surface idleness;
+  // lifetime never depends on the JS garbage collector (see VideoFrame.h).
   std::list<std::shared_ptr<VideoFrame>> issuedFrames;
+  std::list<std::shared_ptr<VideoFrame>> retiredFrames;
   CMTime lastFrameAvailable = kCMTimeInvalid;
   CMTime lastFrameDrawn = kCMTimeInvalid;
   float width;

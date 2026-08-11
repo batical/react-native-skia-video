@@ -222,15 +222,27 @@ VideoCompositionItemDecoder::acquireFrameForTime(CMTime currentTime,
     CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(nextFrame);
     auto frame = std::make_shared<VideoFrame>(buffer, width, height, rotation);
     CFRelease(nextFrame);
-    // Deterministic lifetime: keep the last kIssuedFrameRingDepth issued
-    // frames alive, release the buffer of anything older (see the constant's
-    // documentation for why the depth bounds GPU in-flight sampling). Stale
-    // JS wrappers see an undefined texture instead of pinning a decoder
-    // buffer until garbage collection.
+    // Deterministic lifetime (see VideoFrame.h): frames older than the ring
+    // lose their texture immediately, and their buffer returns to the pool
+    // only once the kernel reports their IOSurface idle — never under
+    // pending GPU sampling work. Stale JS wrappers see an undefined texture
+    // instead of pinning a decoder buffer until garbage collection.
     issuedFrames.push_back(frame);
     while (issuedFrames.size() > kIssuedFrameRingDepth) {
-      issuedFrames.front()->releaseBuffer();
+      issuedFrames.front()->releaseTexture();
+      retiredFrames.push_back(issuedFrames.front());
       issuedFrames.pop_front();
+    }
+    for (auto it = retiredFrames.begin(); it != retiredFrames.end();) {
+      if ((*it)->tryReleaseBuffer()) {
+        it = retiredFrames.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    while (retiredFrames.size() > kRetiredFramesHardCap) {
+      retiredFrames.front()->releaseBuffer();
+      retiredFrames.pop_front();
     }
     return frame;
   }
@@ -262,6 +274,10 @@ void VideoCompositionItemDecoder::release() {
       frame->releaseBuffer();
     }
     issuedFrames.clear();
+    for (const auto& frame : retiredFrames) {
+      frame->releaseBuffer();
+    }
+    retiredFrames.clear();
     hasLooped = false;
     lastRequestedTime = kCMTimeInvalid;
     currentFrame = nullptr;

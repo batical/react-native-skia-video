@@ -15,19 +15,29 @@ namespace RNSkiaVideo {
 using namespace facebook;
 
 /**
- * How many recently issued zero-copy frames a producer keeps alive before
- * releasing the oldest one's buffer.
+ * How many recently issued zero-copy frames a producer keeps fully alive.
  *
- * Why a count is sound here: eviction is indexed on the *issuance* of new
- * frames, i.e. on the drawing tick, and issuance cannot outrun the GPU by
- * more than the Metal drawable pool lets it (CAMetalLayer allows at most
- * maxDrawableCount = 3 frames in flight before the render loop blocks).
- * A depth of maxDrawableCount + 1 therefore guarantees a frame is only
- * released once the GPU can no longer have sampling work queued on it,
- * even under full GPU backlog — without needing a completion fence, which
- * would require hooks into RN Skia's internal command buffers.
+ * Older frames are retired in two stages: their texture view is dropped
+ * immediately (no NEW sampling work can reference them), but their pixel
+ * buffer only returns to the decoder pool once IOSurfaceIsInUse() reports
+ * the surface free — the kernel's use count covers in-flight GPU reads, so
+ * the decoder can never overwrite pixels a late command buffer still
+ * samples. The depth itself (maxDrawableCount + 1) already bounds how far
+ * the GPU can lag issuance, since CAMetalLayer blocks the render loop past
+ * 3 drawables in flight; the use-count check turns that bound into a
+ * guarantee. On the export path this is belt-and-suspenders: the export
+ * loop flushes synchronously (surface.flush(true)), so sampling work is
+ * provably complete before any frame becomes old enough to retire.
  */
 static constexpr size_t kIssuedFrameRingDepth = 4;
+
+/**
+ * Upper bound on retired frames awaiting their surface to go idle, so a
+ * pathological consumer cannot pile buffers up. Force-releasing past this
+ * cap trades a bounded memory peak against a (preview-only, transient)
+ * risk of sampling refreshed pixels.
+ */
+static constexpr size_t kRetiredFramesHardCap = 4;
 
 /**
  * A decoded frame handed to JS. The frame OWNS its pixels: it retains the
@@ -48,8 +58,24 @@ public:
   ~VideoFrame() override;
 
   /**
-   * Returns the pixel buffer and its texture view early, without waiting
-   * for the JS wrapper to be collected. Idempotent.
+   * Drops the frame's texture view: the JS `texture` getter returns
+   * undefined from now on, so no NEW sampling work can reference the frame.
+   * GPU work already in flight is unaffected (Metal retains the underlying
+   * texture inside committed command buffers). Idempotent.
+   */
+  void releaseTexture();
+
+  /**
+   * Returns the pixel buffer to its pool ONLY if its IOSurface is no longer
+   * in use (the kernel's use count covers pending GPU reads), so the
+   * decoder can never overwrite pixels a late command buffer still samples.
+   * Returns true once the buffer is gone. Idempotent.
+   */
+  bool tryReleaseBuffer();
+
+  /**
+   * Releases the texture view and the pixel buffer unconditionally, without
+   * waiting for the JS wrapper to be collected. Idempotent.
    */
   void releaseBuffer();
 
@@ -64,6 +90,9 @@ private:
   double width;
   double height;
   int rotation;
+
+  void releaseTextureLocked();
+  void releaseBufferLocked();
 };
 
 } // namespace RNSkiaVideo
