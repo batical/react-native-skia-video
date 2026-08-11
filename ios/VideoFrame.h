@@ -15,6 +15,21 @@ namespace RNSkiaVideo {
 using namespace facebook;
 
 /**
+ * How many recently issued zero-copy frames a producer keeps alive before
+ * releasing the oldest one's buffer.
+ *
+ * Why a count is sound here: eviction is indexed on the *issuance* of new
+ * frames, i.e. on the drawing tick, and issuance cannot outrun the GPU by
+ * more than the Metal drawable pool lets it (CAMetalLayer allows at most
+ * maxDrawableCount = 3 frames in flight before the render loop blocks).
+ * A depth of maxDrawableCount + 1 therefore guarantees a frame is only
+ * released once the GPU can no longer have sampling work queued on it,
+ * even under full GPU backlog — without needing a completion fence, which
+ * would require hooks into RN Skia's internal command buffers.
+ */
+static constexpr size_t kIssuedFrameRingDepth = 4;
+
+/**
  * A decoded frame handed to JS. The frame OWNS its pixels: it retains the
  * decoder's CVPixelBuffer and exposes a zero-copy Metal texture view over
  * its IOSurface — no per-frame blit, no CPU/GPU sync.

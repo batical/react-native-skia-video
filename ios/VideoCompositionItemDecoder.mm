@@ -222,12 +222,13 @@ VideoCompositionItemDecoder::acquireFrameForTime(CMTime currentTime,
     CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(nextFrame);
     auto frame = std::make_shared<VideoFrame>(buffer, width, height, rotation);
     CFRelease(nextFrame);
-    // Deterministic lifetime: keep the last few issued frames alive (the
-    // GPU may still sample the previous ones for a tick or two), release
-    // the buffer of anything older. Stale JS wrappers see an undefined
-    // texture instead of pinning a decoder buffer until garbage collection.
+    // Deterministic lifetime: keep the last kIssuedFrameRingDepth issued
+    // frames alive, release the buffer of anything older (see the constant's
+    // documentation for why the depth bounds GPU in-flight sampling). Stale
+    // JS wrappers see an undefined texture instead of pinning a decoder
+    // buffer until garbage collection.
     issuedFrames.push_back(frame);
-    while (issuedFrames.size() > 3) {
+    while (issuedFrames.size() > kIssuedFrameRingDepth) {
       issuedFrames.front()->releaseBuffer();
       issuedFrames.pop_front();
     }

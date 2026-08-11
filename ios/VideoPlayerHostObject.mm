@@ -67,9 +67,10 @@ jsi::Value VideoPlayerHostObject::get(jsi::Runtime& runtime,
               std::make_shared<VideoFrame>(buffer, width, height, rotation);
           CVPixelBufferRelease(buffer);
           // Deterministic lifetime: release the buffers of older frames
-          // instead of waiting for their JS wrappers to be collected.
+          // instead of waiting for their JS wrappers to be collected (see
+          // kIssuedFrameRingDepth for why the depth bounds GPU sampling).
           issuedFrames.push_back(currentFrame);
-          while (issuedFrames.size() > 3) {
+          while (issuedFrames.size() > kIssuedFrameRingDepth) {
             issuedFrames.front()->releaseBuffer();
             issuedFrames.pop_front();
           }
