@@ -24,6 +24,13 @@ Pod::Spec.new do |s|
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++20"
   }
 
+  # VTCopyVideoEncoderList and the kVTProfileLevel_* constants are read at link
+  # time, and nothing else here pulls VideoToolbox in: the other Apple
+  # frameworks this pod uses arrive through the Clang modules their headers
+  # declare, which is why none of them is listed. Without this the encoder's
+  # codec probe leaves three undefined symbols at the final link of the app.
+  s.frameworks = "VideoToolbox"
+
   s.dependency "React-callinvoker"
 
   # Install the React Native dependencies (React-Core, TurboModules, codegen, etc.)
