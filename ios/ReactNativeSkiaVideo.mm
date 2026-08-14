@@ -151,6 +151,13 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install) {
         int height = options.getProperty(runtime, "height").asNumber();
         int frameRate = options.getProperty(runtime, "frameRate").asNumber();
         int bitRate = options.getProperty(runtime, "bitRate").asNumber();
+        std::string codec = "h264";
+        if (options.hasProperty(runtime, "codec")) {
+          auto value = options.getProperty(runtime, "codec");
+          if (value.isString()) {
+            codec = value.asString(runtime).utf8(runtime);
+          }
+        }
         int audioBitRate = 128000;
         int audioSampleRate = 44100;
         int audioChannelCount = 2;
@@ -180,12 +187,27 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install) {
         }
 
         auto instance = std::make_shared<VideoEncoderHostObject>(
-            outPath, width, height, frameRate, bitRate, audioBitRate,
+            outPath, width, height, frameRate, bitRate, codec, audioBitRate,
             audioSampleRate, audioChannelCount, composition);
         return jsi::Object::createFromHostObject(runtime, instance);
       });
   RNSVModule.setProperty(runtime, "createVideoEncoder",
                          std::move(createVideoEncoder));
+
+  auto isEncodingSupported = jsi::Function::createFromHostFunction(
+      runtime, jsi::PropNameID::forAscii(runtime, "isEncodingSupported"), 1,
+      [](jsi::Runtime& runtime, const jsi::Value& thisValue,
+         const jsi::Value* arguments, size_t count) -> jsi::Value {
+        if (count < 1 || !arguments[0].isString()) {
+          throw jsi::JSError(runtime,
+                             "ReactNativeSkiaVideo.isEncodingSupported(..) "
+                             "expects a codec name!");
+        }
+        auto codec = arguments[0].asString(runtime).utf8(runtime);
+        return jsi::Value(VideoEncoderHostObject::isCodecSupported(codec));
+      });
+  RNSVModule.setProperty(runtime, "isEncodingSupported",
+                         std::move(isEncodingSupported));
 
   // Worklet runtime threads never drain their autorelease pool, so any
   // per-frame ObjC garbage created by JS code running there (e.g. the Metal

@@ -7,32 +7,29 @@
 
 #import "MTLTextureUtils.h"
 #import <Metal/Metal.h>
-#import <stdexcept>
 
 @implementation MTLTextureUtils
 
-static id<MTLDevice> device;
-inline id<MTLDevice> getDevice() {
-  if (!device) {
++ (nullable id<MTLDevice>)device {
+  static id<MTLDevice> device = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     device = MTLCreateSystemDefaultDevice();
-  }
+  });
   return device;
 }
 
-static id<MTLCommandQueue> commandQueue;
-inline id<MTLCommandQueue> getCommandQueue() {
-  if (!commandQueue) {
-    auto device = getDevice();
-    commandQueue = [device newCommandQueue];
-  }
-  return commandQueue;
-}
-
+// The cache is reached from the decoder queues, the render thread and the
+// export thread, sometimes concurrently, and CVMetalTextureCache makes no
+// thread-safety promise, so every access to it goes through this class and is
+// serialized on it.
 static CVMetalTextureCacheRef metalTextureCache = NULL;
-CVMetalTextureCacheRef getMetalTextureCache() {
+
+// Callers must hold the class lock.
++ (nullable CVMetalTextureCacheRef)cacheLocked {
   if (!metalTextureCache) {
     CVReturn status = CVMetalTextureCacheCreate(
-        kCFAllocatorDefault, NULL, getDevice(), NULL, &metalTextureCache);
+        kCFAllocatorDefault, NULL, [self device], NULL, &metalTextureCache);
     if (status != kCVReturnSuccess) {
       NSLog(@"Failed to create CVMetalTextureCache: %d", status);
       metalTextureCache = NULL;
@@ -41,81 +38,33 @@ CVMetalTextureCacheRef getMetalTextureCache() {
   return metalTextureCache;
 }
 
-+ (nullable id<MTLTexture>)createMTLTextureForVideoOutput:(CGSize)size {
-  MTLTextureDescriptor* descriptor = [[MTLTextureDescriptor alloc] init];
-  descriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
-  descriptor.width = size.width;
-  descriptor.height = size.height;
-  descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
-  descriptor.storageMode = MTLStorageModePrivate;
-
-  auto device = getDevice();
-  return [device newTextureWithDescriptor:descriptor];
-}
-
-+ (void)updateTexture:(id<MTLTexture>)mtlTexture
-                 with:(CVPixelBufferRef)pixelBuffer {
-  @autoreleasepool {
-    [self updateTextureInPool:mtlTexture with:pixelBuffer];
-  }
-}
-
-+ (void)updateTextureInPool:(id<MTLTexture>)mtlTexture
-                       with:(CVPixelBufferRef)pixelBuffer {
-  CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-
++ (nullable CVMetalTextureRef)createTextureViewForPixelBuffer:
+    (CVPixelBufferRef)pixelBuffer {
   size_t width = CVPixelBufferGetWidth(pixelBuffer);
   size_t height = CVPixelBufferGetHeight(pixelBuffer);
 
-  if (width > mtlTexture.width || height > mtlTexture.height) {
-    CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-    throw std::runtime_error(
-        "Pixel buffer dimensions exceed texture dimensions!");
-  }
-
-  // Use CVMetalTextureCache to create a Metal texture directly from the pixel
-  // buffer
   CVMetalTextureRef cvMetalTexture = NULL;
-  CVReturn status = CVMetalTextureCacheCreateTextureFromImage(
-      NULL, getMetalTextureCache(), pixelBuffer, NULL, MTLPixelFormatBGRA8Unorm,
-      width, height, 0, &cvMetalTexture);
-
-  if (status != kCVReturnSuccess || !cvMetalTexture) {
-    CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-    throw std::runtime_error(
-        "Failed to create Metal texture from CVPixelBuffer!");
+  @synchronized(self) {
+    CVMetalTextureCacheRef cache = [self cacheLocked];
+    if (!cache) {
+      return NULL;
+    }
+    CVReturn status = CVMetalTextureCacheCreateTextureFromImage(
+        kCFAllocatorDefault, cache, pixelBuffer, NULL, MTLPixelFormatBGRA8Unorm,
+        width, height, 0, &cvMetalTexture);
+    if (status != kCVReturnSuccess && cvMetalTexture) {
+      CFRelease(cvMetalTexture);
+      cvMetalTexture = NULL;
+    }
   }
-
-  id<MTLTexture> tempTexture = CVMetalTextureGetTexture(cvMetalTexture);
-
-  // Copy the Metal-compatible texture to the destination texture
-  auto commandQueue = getCommandQueue();
-  id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-  id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
-
-  MTLRegion region = MTLRegionMake2D(0, 0, width, height);
-
-  [blitEncoder copyFromTexture:tempTexture
-                   sourceSlice:0
-                   sourceLevel:0
-                  sourceOrigin:region.origin
-                    sourceSize:region.size
-                     toTexture:mtlTexture
-              destinationSlice:0
-              destinationLevel:0
-             destinationOrigin:region.origin];
-
-  [blitEncoder endEncoding];
-  [commandBuffer commit];
-  [commandBuffer waitUntilCompleted];
-
-  CFRelease(cvMetalTexture);
-  CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+  return cvMetalTexture;
 }
 
 + (void)flushTextureCache {
-  if (metalTextureCache) {
-    CVMetalTextureCacheFlush(metalTextureCache, 0);
+  @synchronized(self) {
+    if (metalTextureCache) {
+      CVMetalTextureCacheFlush(metalTextureCache, 0);
+    }
   }
 }
 

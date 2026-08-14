@@ -34,6 +34,9 @@ private:
   RNSVVideoPlayer* player;
   RNSVSkiaVideoPlayerDelegateImpl* playerDelegate;
   std::shared_ptr<VideoFrame> currentFrame;
+  // Bounds the lifetime of the frames handed to JS; never depends on the JS
+  // garbage collector (see VideoFrame.h).
+  VideoFrameRing frameRing;
   CMTime lastFrameAvailable = kCMTimeInvalid;
   CMTime lastFrameDrawn = kCMTimeInvalid;
   float width;

@@ -11,9 +11,16 @@ using namespace facebook;
 class JSI_EXPORT VideoEncoderHostObject : public jsi::HostObject {
 public:
   VideoEncoderHostObject(std::string outPath, int width, int height,
-                         int frameRate, int bitRate, int audioBitRate,
-                         int audioSampleRate, int audioChannelCount,
+                         int frameRate, int bitRate, std::string codec,
+                         int audioBitRate, int audioSampleRate,
+                         int audioChannelCount,
                          std::shared_ptr<VideoComposition> composition);
+
+  /**
+   * Whether the device has an encoder for the given codec ("h264" or "hevc").
+   * H.264 is guaranteed; HEVC needs an A10 or later.
+   */
+  static bool isCodecSupported(const std::string& codec);
   jsi::Value get(jsi::Runtime&, const jsi::PropNameID& name) override;
   std::vector<jsi::PropNameID> getPropertyNames(jsi::Runtime& rt) override;
 
@@ -23,13 +30,13 @@ private:
   int height;
   int bitRate;
   int frameRate;
+  std::string codec;
   int audioBitRate;
   int audioSampleRate;
   int audioChannelCount;
   std::shared_ptr<VideoComposition> composition;
   id<MTLDevice> device;
   id<MTLCommandQueue> commandQueue;
-  id<MTLTexture> cpuAccessibleTexture;
   AVAssetWriter* assetWriter;
   AVAssetWriterInput* assetWriterInput;
   CVPixelBufferPoolRef pixelBufferPool = NULL;

@@ -1,5 +1,4 @@
 #include "VideoCompositionItemDecoder.h"
-#include "MTLTextureUtils.h"
 
 #import "AVAssetTrackUtils.h"
 #import <AVFoundation/AVFoundation.h>
@@ -9,7 +8,12 @@ namespace RNSkiaVideo {
 
 VideoCompositionItemDecoder::VideoCompositionItemDecoder(
     std::shared_ptr<VideoCompositionItem> item, bool realTime,
-    AVURLAsset* sharedAsset) {
+    AVURLAsset* sharedAsset)
+    // The sync (export) consumer flushes the GPU before asking for the next
+    // frame, so retiring a frame the moment it is replaced is safe and keeps
+    // one decoded buffer alive per item instead of four — at 4K that is
+    // ~100MB less per item during an export.
+    : frameRing(realTime ? kPreviewFrameRingDepth : 1) {
   this->item = item;
   this->realTime = realTime;
   lock = [[NSObject alloc] init];
@@ -35,16 +39,6 @@ VideoCompositionItemDecoder::VideoCompositionItemDecoder(
   rotation = AVAssetTrackUtils::GetTrackRotationInDegree(videoTrack);
   currentFrame = nullptr;
   this->setupReader(kCMTimeZero);
-
-  CGSize resolution = item->resolution;
-  if (resolution.width <= 0 || resolution.height <= 0) {
-    resolution.width = width;
-    resolution.height = height;
-  }
-  mtlTexture = [MTLTextureUtils createMTLTextureForVideoOutput:resolution];
-  if (!mtlTexture) {
-    throw std::runtime_error("Failed to create persistent Metal texture!");
-  }
 }
 
 void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
@@ -227,10 +221,17 @@ VideoCompositionItemDecoder::acquireFrameForTime(CMTime currentTime,
     }
   }
   if (nextFrame) {
+    // Zero-copy: the frame wraps the decoder's pixel buffer directly (and
+    // retains it); no intermediate texture, no blit, no CPU/GPU sync.
     CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(nextFrame);
-    [MTLTextureUtils updateTexture:mtlTexture with:buffer];
+    auto frame = std::make_shared<VideoFrame>(buffer, width, height, rotation);
     CFRelease(nextFrame);
-    return std::make_shared<VideoFrame>(mtlTexture, width, height, rotation);
+    // Deterministic lifetime (see VideoFrame.h): frames older than the ring
+    // lose their texture immediately, and their buffer returns to the pool as
+    // soon as nothing reads it anymore. Stale JS wrappers see an undefined
+    // texture instead of pinning a decoder buffer until garbage collection.
+    frameRing.push(frame);
+    return frame;
   }
   return nullptr;
 }
@@ -256,17 +257,10 @@ void VideoCompositionItemDecoder::release() {
       CFRelease(frame.second);
     }
     nextLoopFrames.clear();
+    frameRing.releaseAll();
     hasLooped = false;
     lastRequestedTime = kCMTimeInvalid;
     currentFrame = nullptr;
-  }
-  [MTLTextureUtils flushTextureCache];
-}
-
-VideoCompositionItemDecoder::~VideoCompositionItemDecoder() {
-  @synchronized(lock) {
-    [mtlTexture setPurgeableState:MTLPurgeableStateEmpty];
-    mtlTexture = nil;
   }
 }
 

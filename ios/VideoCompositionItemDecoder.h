@@ -13,7 +13,6 @@ class VideoCompositionItemDecoder {
 public:
   VideoCompositionItemDecoder(std::shared_ptr<VideoCompositionItem> item,
                               bool realTime, AVURLAsset* sharedAsset = nil);
-  ~VideoCompositionItemDecoder();
   void advanceDecoder(CMTime currentTime);
   void seekTo(CMTime currentTime);
   std::shared_ptr<VideoFrame> acquireFrameForTime(CMTime currentTime,
@@ -32,11 +31,13 @@ private:
   AVAssetTrack* videoTrack;
   NSArray<AVAssetTrackSegment*>* segments;
   AVAssetReader* assetReader;
-  id<MTLTexture> mtlTexture;
   std::list<std::pair<double, CMSampleBufferRef>> decodedFrames;
   std::list<std::pair<double, CMSampleBufferRef>> nextLoopFrames;
   CMTime lastRequestedTime = kCMTimeInvalid;
   std::shared_ptr<VideoFrame> currentFrame;
+  // Bounds the lifetime of the frames handed to JS; never depends on the JS
+  // garbage collector (see VideoFrame.h).
+  VideoFrameRing frameRing;
 
   void setupReader(CMTime initialTime);
   double mapSourceTimeToTarget(CMTime sourceTime);

@@ -1,7 +1,11 @@
 #import "VideoEncoderHostObject.h"
 #import "AudioCompositionUtils.h"
+#import "MTLTextureUtils.h"
 #import "RNSVJSIUtils.h"
 #import <Metal/Metal.h>
+// VTCopyVideoEncoderList, for asking the device which codecs it can encode
+// rather than inferring it from the chip generation.
+#import <VideoToolbox/VideoToolbox.h>
 #import <future>
 
 NS_INLINE NSError* createErrorWithMessage(NSString* message) {
@@ -14,17 +18,53 @@ namespace RNSkiaVideo {
 
 VideoEncoderHostObject::VideoEncoderHostObject(
     std::string outPath, int width, int height, int frameRate, int bitRate,
-    int audioBitRate, int audioSampleRate, int audioChannelCount,
-    std::shared_ptr<VideoComposition> composition) {
+    std::string codec, int audioBitRate, int audioSampleRate,
+    int audioChannelCount, std::shared_ptr<VideoComposition> composition) {
   this->outPath = outPath;
   this->width = width;
   this->height = height;
   this->frameRate = frameRate;
   this->bitRate = bitRate;
+  // Resolved here rather than in prepare() so that the fallback is decided
+  // once, before anything is allocated, and the rest of the object can treat
+  // this as a codec the device is known to have.
+  this->codec = isCodecSupported(codec) ? codec : "h264";
   this->audioBitRate = audioBitRate;
   this->audioSampleRate = audioSampleRate;
   this->audioChannelCount = audioChannelCount;
   this->composition = composition;
+}
+
+bool VideoEncoderHostObject::isCodecSupported(const std::string& codec) {
+  if (codec == "h264") {
+    // Every device that runs this library encodes H.264.
+    return true;
+  }
+  if (codec != "hevc") {
+    return false;
+  }
+  // VTCopyVideoEncoderList is the only answer that comes from the encoders the
+  // device actually has, rather than from a hardcoded chip generation. It
+  // reports hardware and software encoders alike, which is what we want: an
+  // HEVC export that lands on a software encoder is slow but correct.
+  CFArrayRef encoders = NULL;
+  if (VTCopyVideoEncoderList(NULL, &encoders) != noErr || encoders == NULL) {
+    return false;
+  }
+  bool supported = false;
+  for (CFIndex i = 0, n = CFArrayGetCount(encoders); i < n && !supported; i++) {
+    auto encoder = (CFDictionaryRef)CFArrayGetValueAtIndex(encoders, i);
+    auto codecType = (CFNumberRef)CFDictionaryGetValue(
+        encoder, kVTVideoEncoderList_CodecType);
+    int32_t value = 0;
+    if (codecType &&
+        CFNumberGetValue(codecType, kCFNumberSInt32Type, &value) &&
+        value == kCMVideoCodecType_HEVC) {
+      supported = true;
+    }
+  }
+  CFRelease(encoders);
+  return supported;
 }
 
 std::vector<jsi::PropNameID>
@@ -96,15 +136,25 @@ void VideoEncoderHostObject::prepare() {
     throw error;
   }
 
+  bool isHEVC = codec == "hevc";
+
+  // The profile is codec specific and the H.264 constants are rejected outright
+  // for HEVC, so the compression properties are built per codec rather than
+  // shared. HEVC's Main profile is the interoperable one — Main10 would mean
+  // a 10 bit pixel format, which this encoder does not produce.
+  NSMutableDictionary* compressionProperties = [@{
+    AVVideoAverageBitRateKey : @(bitRate),
+    AVVideoMaxKeyFrameIntervalKey : @(frameRate),
+  } mutableCopy];
+  compressionProperties[AVVideoProfileLevelKey] =
+      isHEVC ? (id)kVTProfileLevel_HEVC_Main_AutoLevel
+             : (id)AVVideoProfileLevelH264HighAutoLevel;
+
   auto videoSettings = @{
-    AVVideoCodecKey : AVVideoCodecTypeH264,
+    AVVideoCodecKey : isHEVC ? AVVideoCodecTypeHEVC : AVVideoCodecTypeH264,
     AVVideoWidthKey : @(width),
     AVVideoHeightKey : @(height),
-    AVVideoCompressionPropertiesKey : @{
-      AVVideoAverageBitRateKey : @(bitRate),
-      AVVideoMaxKeyFrameIntervalKey : @(frameRate),
-      AVVideoProfileLevelKey : AVVideoProfileLevelH264HighAutoLevel,
-    }
+    AVVideoCompressionPropertiesKey : compressionProperties,
   };
 
   assetWriterInput =
@@ -131,7 +181,9 @@ void VideoEncoderHostObject::prepare() {
     startWritingAudio();
   }
 
-  device = MTLCreateSystemDefaultDevice();
+  // Same device as the texture cache: the blit below writes into a texture
+  // that cache vends, and Metal cannot mix resources across devices.
+  device = [MTLTextureUtils device];
   commandQueue = [device newCommandQueue];
 
   NSDictionary* attributes = @{
@@ -139,6 +191,7 @@ void VideoEncoderHostObject::prepare() {
     (NSString*)kCVPixelBufferWidthKey : @(width),
     (NSString*)kCVPixelBufferHeightKey : @(height),
     (NSString*)kCVPixelBufferMetalCompatibilityKey : @YES,
+    (NSString*)kCVPixelBufferIOSurfacePropertiesKey : @{},
   };
   // Allocate a fresh buffer per frame from this pool instead of reusing a
   // single CVPixelBuffer. AVAssetWriter encodes appended buffers
@@ -158,39 +211,14 @@ void VideoEncoderHostObject::prepare() {
     throw createErrorWithMessage(@"Could not create pixel buffer pool");
     return;
   }
-
-  MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-      texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                   width:width
-                                  height:height
-                               mipmapped:NO];
-  descriptor.storageMode = MTLStorageModeShared;
-  descriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
-  cpuAccessibleTexture = [device newTextureWithDescriptor:descriptor];
 }
 
 void VideoEncoderHostObject::encodeFrame(id<MTLTexture> mlTexture,
                                          CMTime time) {
-  id<MTLCommandBuffer> commandBuffer =
-      [commandQueue commandBufferWithUnretainedReferences];
-  id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
-  [blitEncoder copyFromTexture:mlTexture
-                   sourceSlice:0
-                   sourceLevel:0
-                  sourceOrigin:MTLOriginMake(0, 0, 0)
-                    sourceSize:MTLSizeMake(mlTexture.width, mlTexture.height, 1)
-                     toTexture:cpuAccessibleTexture
-              destinationSlice:0
-              destinationLevel:0
-             destinationOrigin:MTLOriginMake(0, 0, 0)];
-
-  [blitEncoder endEncoding];
-  [commandBuffer commit];
-  [commandBuffer waitUntilCompleted];
-
-  // Vend a fresh buffer from the pool for every frame so the bytes we write
+  // Vend a fresh buffer from the pool for every frame so the pixels written
   // below can never be overwritten while a previous frame is still being
-  // encoded.
+  // encoded. The pool only recycles a buffer once every reference to it
+  // (the encoder's included) is gone.
   CVPixelBufferRef pixelBuffer = NULL;
   CVReturn status = CVPixelBufferPoolCreatePixelBuffer(
       kCFAllocatorDefault, pixelBufferPool, &pixelBuffer);
@@ -198,22 +226,46 @@ void VideoEncoderHostObject::encodeFrame(id<MTLTexture> mlTexture,
     throw createErrorWithMessage(@"Could not allocate pixel buffer from pool");
   }
 
-  CVPixelBufferLockBaseAddress(pixelBuffer, 0);
-  void* pixelBufferBytes = CVPixelBufferGetBaseAddress(pixelBuffer);
-  if (pixelBufferBytes == NULL) {
-    CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+  // Blit the rendered texture straight into the buffer's IOSurface through a
+  // zero-copy Metal view: the GPU writes the very memory the video encoder
+  // will read — no CPU-accessible staging texture, no getBytes round-trip.
+  CVMetalTextureRef cvMetalTexture =
+      [MTLTextureUtils createTextureViewForPixelBuffer:pixelBuffer];
+  if (!cvMetalTexture) {
     CVPixelBufferRelease(pixelBuffer);
-    throw createErrorWithMessage(@"Could not extract pixels from frame");
+    throw createErrorWithMessage(
+        @"Could not create Metal view over encoder pixel buffer");
   }
-  size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
 
-  MTLRegion region = MTLRegionMake2D(0, 0, width, height);
+  id<MTLTexture> destination = CVMetalTextureGetTexture(cvMetalTexture);
+  // A source larger than the output would read past the destination and fault
+  // the GPU, so crop instead — the caller renders at the export resolution,
+  // this only guards against a mismatched surface.
+  MTLSize copySize = MTLSizeMake(MIN(mlTexture.width, destination.width),
+                                 MIN(mlTexture.height, destination.height), 1);
 
-  [cpuAccessibleTexture getBytes:pixelBufferBytes
-                     bytesPerRow:bytesPerRow
-                      fromRegion:region
-                     mipmapLevel:0];
-  CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+  id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+  id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+  [blitEncoder copyFromTexture:mlTexture
+                   sourceSlice:0
+                   sourceLevel:0
+                  sourceOrigin:MTLOriginMake(0, 0, 0)
+                    sourceSize:copySize
+                     toTexture:destination
+              destinationSlice:0
+              destinationLevel:0
+             destinationOrigin:MTLOriginMake(0, 0, 0)];
+
+  [blitEncoder endEncoding];
+  [commandBuffer commit];
+  // The buffer is handed to the encoder right below: the blit must be done
+  // before the encoder reads the surface.
+  [commandBuffer waitUntilCompleted];
+  CFRelease(cvMetalTexture);
+  // Drop the cache's own reference to the surface too. Without this the cache
+  // pins every buffer it has vended a texture for, the pool can never recycle
+  // one, and a long export allocates a fresh full-resolution buffer per frame.
+  [MTLTextureUtils flushTextureCache];
 
   int attempt = 0;
   while (!assetWriterInput.isReadyForMoreMediaData) {
@@ -438,10 +490,8 @@ void VideoEncoderHostObject::release() {
     CVPixelBufferPoolRelease(pixelBufferPool);
     pixelBufferPool = NULL;
   }
-  if (cpuAccessibleTexture) {
-    [cpuAccessibleTexture setPurgeableState:MTLPurgeableStateEmpty];
-  }
-  cpuAccessibleTexture = nil;
+  // Release the last surfaces the cache still holds for this export.
+  [MTLTextureUtils flushTextureCache];
   commandQueue = nil;
   device = nil;
 }

@@ -58,13 +58,18 @@ jsi::Value VideoPlayerHostObject::get(jsi::Runtime& runtime,
               CMTimeCompare(lastFrameDrawn, lastFrameAvailable) == 0) {
             return jsi::Value::null();
           }
-          auto texture = [player getNextTextureForTime:lastFrameAvailable];
-          if (texture == nil) {
+          auto buffer = [player copyPixelBufferForTime:lastFrameAvailable];
+          if (buffer == NULL) {
             return jsi::Value::null();
           }
           lastFrameDrawn = lastFrameAvailable;
           currentFrame =
-              std::make_shared<VideoFrame>(texture, width, height, rotation);
+              std::make_shared<VideoFrame>(buffer, width, height, rotation);
+          CVPixelBufferRelease(buffer);
+          // Deterministic lifetime (see VideoFrame.h): retire frames older
+          // than the ring and give their buffer back to the player's pool as
+          // soon as nothing reads it anymore.
+          frameRing.push(currentFrame);
           return jsi::Object::createFromHostObject(runtime, currentFrame);
         });
   } else if (propName == "play") {
@@ -198,6 +203,7 @@ void VideoPlayerHostObject::readyToPlay(float width, float height,
 void VideoPlayerHostObject::release() {
   if (!released.test_and_set()) {
     removeAllListeners();
+    frameRing.releaseAll();
     if (currentFrame) {
       currentFrame = nullptr;
     }

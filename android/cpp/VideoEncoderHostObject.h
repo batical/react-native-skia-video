@@ -18,10 +18,16 @@ public:
   local_ref<VideoEncoder> static create(std::string& outPath, int width,
                                         int height, int frameRate, int bitRate,
                                         std::optional<std::string> encoderName,
+                                        std::optional<std::string> codec,
                                         alias_ref<VideoComposition> composition,
                                         int audioSampleRate,
                                         int audioChannelCount,
                                         int audioBitRate);
+
+  /**
+   * Whether the device has an encoder for the given codec ("h264" or "hevc").
+   */
+  static bool isCodecSupported(const std::string& codec);
 
   void prepare() const;
 
@@ -39,6 +45,7 @@ public:
   VideoEncoderHostObject(std::string& outPath, int width, int height,
                          int frameRate, int bitRate,
                          std::optional<std::string> encoderName,
+                         std::optional<std::string> codec,
                          alias_ref<VideoComposition> composition,
                          int audioSampleRate, int audioChannelCount,
                          int audioBitRate);
