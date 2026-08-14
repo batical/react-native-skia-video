@@ -1,0 +1,1 @@
+{"version":3,"file":"useEventListener.d.ts","sourceRoot":"","sources":["../../../../src/utils/useEventListener.ts"],"names":[],"mappings":"AAEA,QAAA,MAAM,gBAAgB,GAAI,MAAM,SAAS,MAAM,EAAE,QAAQ,EACvD,SAAS;IAAE,EAAE,CAAC,KAAK,EAAE,MAAM,EAAE,QAAQ,EAAE,QAAQ,GAAG,MAAM,IAAI,CAAA;CAAE,GAAG,IAAI,EACrE,WAAW,MAAM,EACjB,SAAS,GAAG,SAMb,CAAC;AAEF,eAAe,gBAAgB,CAAC"}
