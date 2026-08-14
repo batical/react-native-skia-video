@@ -182,8 +182,22 @@ export const useVideoCompositionPlayer = ({
       return;
     }
 
-    const pixelWidth = width * pixelRatio;
-    const pixelHeight = height * pixelRatio;
+    const pixelWidth = Math.floor(width * pixelRatio);
+    const pixelHeight = Math.floor(height * pixelRatio);
+
+    // A player inside a view that has not been laid out yet is called with a
+    // zero — or NaN — size. MakeOffscreen accepts it and hands back a surface
+    // whose texture is null, which aborts the process inside
+    // MakeImageFromNativeTextureUnstable rather than throwing. Waiting for a
+    // real size costs one frame and cannot crash.
+    if (
+      !(pixelWidth > 0) ||
+      !(pixelHeight > 0) ||
+      !isFinite(pixelWidth) ||
+      !isFinite(pixelHeight)
+    ) {
+      return;
+    }
 
     let surface: SkSurface | null = surfaceSharedValue.value;
 
@@ -223,12 +237,22 @@ export const useVideoCompositionPlayer = ({
       height: pixelHeight,
     });
     surface.flush();
+
+    // Checked rather than passed straight through: the texture is read by
+    // native code that asserts on its type, so a null one aborts the process
+    // instead of raising something the catch below could take.
+    const texture = surface.getNativeTextureUnstable();
+    if (!texture) {
+      console.warn('Surface has no native texture');
+      return;
+    }
+
     const previousFrame = currentFrame.value;
     try {
       // Recycle the previous SkImage (outputImage) to avoid allocating a new
       // JSI object on every frame.
       const nextFrame = Skia.Image.MakeImageFromNativeTextureUnstable(
-        surface.getNativeTextureUnstable(),
+        texture,
         pixelWidth,
         pixelHeight,
         false,
