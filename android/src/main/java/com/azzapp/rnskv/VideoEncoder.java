@@ -3,6 +3,7 @@ package com.azzapp.rnskv;
 import android.graphics.Bitmap;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.opengl.GLES20;
@@ -28,7 +29,56 @@ public class VideoEncoder {
 
   public static final String MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
 
+  public static final String MIME_TYPE_HEVC = "video/hevc";  // H.265 High Efficiency Video Coding
+
   public static final int DEFAULT_I_FRAME_INTERVAL_SECONDS = 1;
+
+  /**
+   * Maps a codec name from the JS API onto its Android mime type, falling back
+   * to H.264 for anything the device cannot encode — including an unknown name.
+   * H.264 is mandated by the platform, so the fallback is always available.
+   *
+   * @param codec the codec name, "h264" or "hevc"; null means H.264
+   * @return the mime type to encode with
+   */
+  public static String resolveMimeType(String codec) {
+    if ("hevc".equals(codec) && isCodecSupported("hevc")) {
+      return MIME_TYPE_HEVC;
+    }
+    return MIME_TYPE;
+  }
+
+  /**
+   * Whether the device has an encoder for the given codec.
+   *
+   * HEVC decoding is far more common than HEVC encoding on Android, so this
+   * asks specifically for encoders rather than for codec support at large.
+   *
+   * @param codec the codec name, "h264" or "hevc"
+   * @return true if an encoder exists for it
+   */
+  public static boolean isCodecSupported(String codec) {
+    String mimeType;
+    if ("h264".equals(codec)) {
+      mimeType = MIME_TYPE;
+    } else if ("hevc".equals(codec)) {
+      mimeType = MIME_TYPE_HEVC;
+    } else {
+      return false;
+    }
+    MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+    for (MediaCodecInfo info : codecList.getCodecInfos()) {
+      if (!info.isEncoder()) {
+        continue;
+      }
+      for (String supported : info.getSupportedTypes()) {
+        if (supported.equalsIgnoreCase(mimeType)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   private final String outputPath;
 
@@ -41,6 +91,8 @@ public class VideoEncoder {
   private final int bitRate;
 
   private final String encoderName;
+
+  private final String mimeType;
 
   private final VideoComposition composition;
 
@@ -89,6 +141,9 @@ public class VideoEncoder {
    * @param frameRate  the frame rate of the video
    * @param bitRate    the bit rate of the video
    * @param encoderName the name of the encoder to use, or null to use the default encoder
+   * @param codec      the codec to encode with ("h264" or "hevc"), or null for
+   *                   H.264; ignored when encoderName names an encoder, and
+   *                   falls back to H.264 when the device cannot encode it
    * @param composition the composition being exported, used to encode the
    *                    audio of its audio-enabled items; can be null
    * @param audioSampleRate the sample rate of the exported audio track
@@ -102,6 +157,7 @@ public class VideoEncoder {
     int frameRate,
     int bitRate,
     String encoderName,
+    String codec,
     VideoComposition composition,
     int audioSampleRate,
     int audioChannelCount,
@@ -113,6 +169,9 @@ public class VideoEncoder {
     this.frameRate = frameRate;
     this.bitRate = bitRate;
     this.encoderName = encoderName;
+    // Resolved once here so the rest of the object works with a mime type the
+    // device is known to have an encoder for.
+    this.mimeType = resolveMimeType(codec);
     this.composition = composition;
     this.audioSampleRate = audioSampleRate;
     this.audioChannelCount = audioChannelCount;
@@ -128,9 +187,9 @@ public class VideoEncoder {
     EGLContext sharedContext = EGLUtils.getCurrentContextOrThrows();
     encoder = encoderName != null
       ? MediaCodec.createByCodecName(encoderName)
-      : MediaCodec.createEncoderByType(MIME_TYPE);
+      : MediaCodec.createEncoderByType(mimeType);
 
-    MediaFormat format = MediaFormat.createVideoFormat(MIME_TYPE, width, height);
+    MediaFormat format = MediaFormat.createVideoFormat(mimeType, width, height);
     format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
       MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
     format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);

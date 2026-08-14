@@ -115,6 +115,13 @@ void install(jsi::Runtime& jsiRuntime) {
             encoderName = value.asString(runtime).utf8(runtime);
           }
         }
+        std::optional<std::string> codec = std::nullopt;
+        if (options.hasProperty(runtime, "codec")) {
+          auto value = options.getProperty(runtime, "codec");
+          if (value.isString()) {
+            codec = value.asString(runtime).utf8(runtime);
+          }
+        }
         int audioSampleRate = 44100;
         int audioChannelCount = 2;
         int audioBitRate = 128000;
@@ -144,12 +151,28 @@ void install(jsi::Runtime& jsiRuntime) {
         }
 
         auto instance = std::make_shared<VideoEncoderHostObject>(
-            outPath, width, height, frameRate, bitRate, encoderName,
+            outPath, width, height, frameRate, bitRate, encoderName, codec,
             composition, audioSampleRate, audioChannelCount, audioBitRate);
         return jsi::Object::createFromHostObject(runtime, instance);
       });
   RNSVModule.setProperty(jsiRuntime, "createVideoEncoder",
                          std::move(createVideoEncoder));
+
+  auto isEncodingSupported = jsi::Function::createFromHostFunction(
+      jsiRuntime, jsi::PropNameID::forAscii(jsiRuntime, "isEncodingSupported"),
+      1,
+      [](jsi::Runtime& runtime, const jsi::Value& thisValue,
+         const jsi::Value* arguments, size_t count) -> jsi::Value {
+        if (count < 1 || !arguments[0].isString()) {
+          throw jsi::JSError(runtime, "ReactNativeSkiaVideo."
+                                      "isEncodingSupported(..) expects a codec "
+                                      "name!");
+        }
+        auto codec = arguments[0].asString(runtime).utf8(runtime);
+        return jsi::Value(VideoEncoder::isCodecSupported(codec));
+      });
+  RNSVModule.setProperty(jsiRuntime, "isEncodingSupported",
+                         std::move(isEncodingSupported));
 
   auto getDecodingCapabilitiesFor = jsi::Function::createFromHostFunction(
       jsiRuntime,

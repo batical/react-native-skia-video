@@ -29,3 +29,13 @@ export const getDecodingCapabilitiesFor: typeof RNSkiaVideoModule.getDecodingCap
       );
     }
   };
+
+/**
+ * Whether the device can encode with the given codec.
+ *
+ * Unlike the two above this is answered on both platforms. Use it to decide
+ * whether to offer a codec at all; exports fall back to H.264 by themselves
+ * when the answer is false.
+ */
+export const isEncodingSupported: typeof RNSkiaVideoModule.isEncodingSupported =
+  (...args) => RNSkiaVideoModule.isEncodingSupported(...args);

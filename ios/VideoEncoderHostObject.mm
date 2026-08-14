@@ -3,6 +3,9 @@
 #import "MTLTextureUtils.h"
 #import "RNSVJSIUtils.h"
 #import <Metal/Metal.h>
+// VTCopyVideoEncoderList, for asking the device which codecs it can encode
+// rather than inferring it from the chip generation.
+#import <VideoToolbox/VideoToolbox.h>
 #import <future>
 
 NS_INLINE NSError* createErrorWithMessage(NSString* message) {
@@ -15,17 +18,53 @@ namespace RNSkiaVideo {
 
 VideoEncoderHostObject::VideoEncoderHostObject(
     std::string outPath, int width, int height, int frameRate, int bitRate,
-    int audioBitRate, int audioSampleRate, int audioChannelCount,
-    std::shared_ptr<VideoComposition> composition) {
+    std::string codec, int audioBitRate, int audioSampleRate,
+    int audioChannelCount, std::shared_ptr<VideoComposition> composition) {
   this->outPath = outPath;
   this->width = width;
   this->height = height;
   this->frameRate = frameRate;
   this->bitRate = bitRate;
+  // Resolved here rather than in prepare() so that the fallback is decided
+  // once, before anything is allocated, and the rest of the object can treat
+  // this as a codec the device is known to have.
+  this->codec = isCodecSupported(codec) ? codec : "h264";
   this->audioBitRate = audioBitRate;
   this->audioSampleRate = audioSampleRate;
   this->audioChannelCount = audioChannelCount;
   this->composition = composition;
+}
+
+bool VideoEncoderHostObject::isCodecSupported(const std::string& codec) {
+  if (codec == "h264") {
+    // Every device that runs this library encodes H.264.
+    return true;
+  }
+  if (codec != "hevc") {
+    return false;
+  }
+  // VTCopyVideoEncoderList is the only answer that comes from the encoders the
+  // device actually has, rather than from a hardcoded chip generation. It
+  // reports hardware and software encoders alike, which is what we want: an
+  // HEVC export that lands on a software encoder is slow but correct.
+  CFArrayRef encoders = NULL;
+  if (VTCopyVideoEncoderList(NULL, &encoders) != noErr || encoders == NULL) {
+    return false;
+  }
+  bool supported = false;
+  for (CFIndex i = 0, n = CFArrayGetCount(encoders); i < n && !supported; i++) {
+    auto encoder = (CFDictionaryRef)CFArrayGetValueAtIndex(encoders, i);
+    auto codecType = (CFNumberRef)CFDictionaryGetValue(
+        encoder, kVTVideoEncoderList_CodecType);
+    int32_t value = 0;
+    if (codecType &&
+        CFNumberGetValue(codecType, kCFNumberSInt32Type, &value) &&
+        value == kCMVideoCodecType_HEVC) {
+      supported = true;
+    }
+  }
+  CFRelease(encoders);
+  return supported;
 }
 
 std::vector<jsi::PropNameID>
@@ -97,15 +136,25 @@ void VideoEncoderHostObject::prepare() {
     throw error;
   }
 
+  bool isHEVC = codec == "hevc";
+
+  // The profile is codec specific and the H.264 constants are rejected outright
+  // for HEVC, so the compression properties are built per codec rather than
+  // shared. HEVC's Main profile is the interoperable one — Main10 would mean
+  // a 10 bit pixel format, which this encoder does not produce.
+  NSMutableDictionary* compressionProperties = [@{
+    AVVideoAverageBitRateKey : @(bitRate),
+    AVVideoMaxKeyFrameIntervalKey : @(frameRate),
+  } mutableCopy];
+  compressionProperties[AVVideoProfileLevelKey] =
+      isHEVC ? (id)kVTProfileLevel_HEVC_Main_AutoLevel
+             : (id)AVVideoProfileLevelH264HighAutoLevel;
+
   auto videoSettings = @{
-    AVVideoCodecKey : AVVideoCodecTypeH264,
+    AVVideoCodecKey : isHEVC ? AVVideoCodecTypeHEVC : AVVideoCodecTypeH264,
     AVVideoWidthKey : @(width),
     AVVideoHeightKey : @(height),
-    AVVideoCompressionPropertiesKey : @{
-      AVVideoAverageBitRateKey : @(bitRate),
-      AVVideoMaxKeyFrameIntervalKey : @(frameRate),
-      AVVideoProfileLevelKey : AVVideoProfileLevelH264HighAutoLevel,
-    }
+    AVVideoCompressionPropertiesKey : compressionProperties,
   };
 
   assetWriterInput =

@@ -376,6 +376,16 @@ export type VideoEncoder = {
 };
 
 /**
+ * The video codec used to encode an export.
+ *
+ * `h264` is supported by every device this library runs on, and is what
+ * playback and upload pipelines are universally built around. `hevc` produces
+ * roughly the same quality at about half the bitrate, but is not available
+ * everywhere — see {@link RNSkiaVideoModule.isEncodingSupported}.
+ */
+export type VideoCodec = 'h264' | 'hevc';
+
+/**
  * The export options for a video composition.
  */
 export type ExportOptions = {
@@ -400,7 +410,23 @@ export type ExportOptions = {
    */
   bitRate: number;
   /**
+   * The video codec to encode with.
+   *
+   * Falls back to `h264` when the requested codec has no encoder on the
+   * device, so passing `hevc` can never fail an export that `h264` would have
+   * completed. Call {@link RNSkiaVideoModule.isEncodingSupported} first if the
+   * choice is surfaced to a user, so the option can be hidden rather than
+   * silently ignored.
+   *
+   * @default 'h264'
+   */
+  codec?: VideoCodec;
+  /**
    * The encoder name to use for the export.
+   *
+   * Takes precedence over {@link codec}: naming an encoder selects it
+   * directly, whatever codec it implements.
+   *
    * @platform android
    */
   encoderName?: string | null;
@@ -507,6 +533,21 @@ export type RNSkiaVideoModule = {
      */
     maxHeight: number;
   } | null;
+
+  /**
+   * Whether the device can encode with the given codec.
+   *
+   * `h264` is always true. `hevc` depends on the hardware: an A10 or later on
+   * iOS, and a device dependent answer on Android, where HEVC decoding is far
+   * more common than HEVC encoding.
+   *
+   * Exports fall back to `h264` on their own when this returns false, so this
+   * is for the UI — hiding or disabling a codec the device cannot honour is
+   * better than accepting the choice and quietly ignoring it.
+   *
+   * @param codec The codec to test.
+   */
+  isEncodingSupported(codec: VideoCodec): boolean;
 
   /**
    * Given a set of encoder configurations,
