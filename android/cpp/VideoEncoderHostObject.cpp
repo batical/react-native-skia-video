@@ -15,10 +15,18 @@ VideoEncoder::create(std::string& outPath, int width, int height, int frameRate,
                      alias_ref<VideoComposition> composition,
                      int audioSampleRate, int audioChannelCount,
                      int audioBitRate) {
+  // Both strings are nullable on the Java side (a null codec means H.264), so
+  // they are built as jstring refs rather than handed over as std::string: a
+  // ternary mixing std::string and nullptr collapses to std::string, and
+  // constructing one from nullptr calls strlen(nullptr).
+  auto encoderNameRef = encoderName.has_value()
+                            ? make_jstring(encoderName.value())
+                            : local_ref<JString>(nullptr);
+  auto codecRef = codec.has_value() ? make_jstring(codec.value())
+                                    : local_ref<JString>(nullptr);
   return newInstance(outPath, width, height, frameRate, bitRate,
-                     encoderName.has_value() ? encoderName.value() : nullptr,
-                     codec.has_value() ? codec.value() : nullptr, composition,
-                     audioSampleRate, audioChannelCount, audioBitRate);
+                     encoderNameRef, codecRef, composition, audioSampleRate,
+                     audioChannelCount, audioBitRate);
 }
 
 bool VideoEncoder::isCodecSupported(const std::string& codec) {
