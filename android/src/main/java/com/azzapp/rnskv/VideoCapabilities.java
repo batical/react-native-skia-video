@@ -121,28 +121,48 @@ public class VideoCapabilities {
     }
   }
 
+  /**
+   * Returns the configurations the platform encoders will actually accept,
+   * closest to the requested one.
+   *
+   * @param width     the requested width
+   * @param height    the requested height
+   * @param frameRate the requested frame rate in frames per second
+   * @param bitRate   the requested bit rate in bits per second
+   * @param codec     the codec to probe encoders for, "h264" or "hevc"; null
+   *                  means H.264. A codec the device cannot encode falls back
+   *                  to H.264, so the answer always describes the codec an
+   *                  export with the same argument would really use.
+   * @return the valid configurations, empty if none were found
+   */
   public static List<EncoderInfo> getValidEncoderConfigurations(
     int width,
     int height,
     int frameRate,
-    int bitRate
+    int bitRate,
+    String codec
   ) {
     List<EncoderInfo> encoderInfos = new ArrayList<>();
+
+    // Probed with the mime type the export will encode with: sizes, frame rates
+    // and bitrates accepted by an H.264 encoder say nothing about what the HEVC
+    // one on the same chip will take.
+    String mimeType = VideoEncoder.resolveMimeType(codec);
 
     boolean rotated = height > width;
 
     List<MediaCodecInfoWithOverrides> mediaCodecInfoWithOverrides =
-      getPotentialEncoders(VideoEncoder.MIME_TYPE,
+      getPotentialEncoders(mimeType,
         rotated ? height : width, rotated ? width : height,
         frameRate, bitRate);
 
     for (MediaCodecInfoWithOverrides codecInfoWithOverrides : mediaCodecInfoWithOverrides) {
       MediaFormat format;
       if (rotated) {
-        format = MediaFormat.createVideoFormat(VideoEncoder.MIME_TYPE,
+        format = MediaFormat.createVideoFormat(mimeType,
           codecInfoWithOverrides.height, codecInfoWithOverrides.width);
       } else {
-        format = MediaFormat.createVideoFormat(VideoEncoder.MIME_TYPE,
+        format = MediaFormat.createVideoFormat(mimeType,
           codecInfoWithOverrides.width, codecInfoWithOverrides.height);
       }
       format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
