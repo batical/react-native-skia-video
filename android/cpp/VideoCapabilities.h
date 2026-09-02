@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fbjni/fbjni.h>
+#include <optional>
 #include <jsi/jsi.h>
 
 namespace RNSkiaVideo {
@@ -36,7 +37,8 @@ public:
   getDecodingCapabilitiesFor(std::string mimeType);
   static jni::local_ref<JList<EncoderInfo>>
   getValidEncoderConfigurations(int width, int height, int framerate,
-                                int bitrate);
+                                int bitrate,
+                                std::optional<std::string> codec);
 };
 
 } // namespace RNSkiaVideo

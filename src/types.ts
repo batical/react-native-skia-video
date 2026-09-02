@@ -557,12 +557,18 @@ export type RNSkiaVideoModule = {
    * @param height The height of the video.
    * @param frameRate The frame rate of the video in frames per second.
    * @param bitRate The bit rate of the video in bits per second.
+   * @param codec The codec the export will encode with, defaulting to `h264`.
+   * Pass the same value here and to {@link ExportOptions.codec}: the sizes and
+   * frame rates an H.264 encoder accepts say nothing about what the HEVC one on
+   * the same chip will take. A codec the device cannot encode falls back to
+   * `h264`, as an export would.
    */
   getValidEncoderConfigurations(
     width: number,
     height: number,
     frameRate: number,
-    bitRate: number
+    bitRate: number,
+    codec?: VideoCodec
   ):
     | {
         /**

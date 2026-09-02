@@ -202,7 +202,8 @@ void install(jsi::Runtime& jsiRuntime) {
 
   auto getValidEncoderConfigurations = jsi::Function::createFromHostFunction(
       jsiRuntime,
-      jsi::PropNameID::forAscii(jsiRuntime, "getDecodingCapabilitiesFor"), 4,
+      jsi::PropNameID::forAscii(jsiRuntime, "getValidEncoderConfigurations"),
+      4,
       [](jsi::Runtime& runtime, const jsi::Value& thisValue,
          const jsi::Value* arguments, size_t count) -> jsi::Value {
         int width = (int)arguments[0].asNumber();
@@ -210,8 +211,13 @@ void install(jsi::Runtime& jsiRuntime) {
         int framerate = (int)arguments[2].asNumber();
         int bitrate = (int)arguments[3].asNumber();
 
+        std::optional<std::string> codec = std::nullopt;
+        if (count > 4 && arguments[4].isString()) {
+          codec = arguments[4].asString(runtime).utf8(runtime);
+        }
+
         auto encoderInfos = VideoCapabilities::getValidEncoderConfigurations(
-            width, height, framerate, bitrate);
+            width, height, framerate, bitrate, codec);
 
         if (encoderInfos == nullptr) {
           return jsi::Value::null();

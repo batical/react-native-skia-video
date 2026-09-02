@@ -68,15 +68,20 @@ VideoCapabilities::getDecodingCapabilitiesFor(std::string mimeType) {
 }
 
 jni::local_ref<JList<EncoderInfo>>
-VideoCapabilities::getValidEncoderConfigurations(int width, int height,
-                                                 int framerate, int bitrate) {
+VideoCapabilities::getValidEncoderConfigurations(
+    int width, int height, int framerate, int bitrate,
+    std::optional<std::string> codec) {
   static const auto cls = javaClassStatic();
 
   static const auto getValidEncoderConfigurationsMethod =
       cls->getStaticMethod<jni::local_ref<JList<EncoderInfo>>(
-          jint, jint, jint, jint)>("getValidEncoderConfigurations");
+          jint, jint, jint, jint, jstring)>("getValidEncoderConfigurations");
+  // Nullable on the Java side, so built as a jstring ref: handing over a
+  // std::string built from nullptr would call strlen(nullptr).
+  auto codecRef = codec.has_value() ? make_jstring(codec.value())
+                                    : local_ref<JString>(nullptr);
   return getValidEncoderConfigurationsMethod(cls, width, height, framerate,
-                                             bitrate);
+                                             bitrate, codecRef.get());
 }
 
 } // namespace RNSkiaVideo
