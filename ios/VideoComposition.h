@@ -13,6 +13,14 @@ public:
   double startTime;
   double duration;
   CGSize resolution;
+  /**
+   * Cap for the longest side of the decoded frames, or 0 for the file's own
+   * size. Applied here rather than by the caller because only the decoder knows
+   * the track's encoded orientation: a portrait clip is a landscape frame plus a
+   * rotation, so a caller passing a portrait size for one gets a squashed
+   * picture. See VideoCompositionItemDecoder#setupReader.
+   */
+  double maxLongSide = 0;
   bool isVideo = true;
   bool audioEnabled = false;
   double audioVolume = 1.0;
@@ -60,6 +68,13 @@ public:
           item->resolution.width = res.getProperty(runtime, "width").asNumber();
           item->resolution.height =
               res.getProperty(runtime, "height").asNumber();
+        }
+      }
+
+      if (jsItem.hasProperty(runtime, "maxLongSide")) {
+        auto capProp = jsItem.getProperty(runtime, "maxLongSide");
+        if (capProp.isNumber()) {
+          item->maxLongSide = capProp.asNumber();
         }
       }
 

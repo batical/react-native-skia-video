@@ -63,6 +63,30 @@ void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
     (id)kCVPixelBufferMetalCompatibilityKey : @YES
   };
   CGSize resolution = item->resolution;
+  /*
+   * No explicit size asked for, but a cap on the longest side: scale the
+   * track's own dimensions to fit it.
+   *
+   * This is the size the frames are *decoded* at, so it is what the preview's
+   * four-deep frame ring costs. Left uncapped, a 4K clip is 33 MB a frame in
+   * BGRA — 133 MB of ring to fill a stage a few hundred points wide, which the
+   * OS watchdog terminates the app over.
+   *
+   * `naturalSize` is the encoded size, before the display matrix, which is why
+   * the cap is resolved here: a caller holding only display dimensions cannot
+   * tell a portrait clip from a rotated landscape one, and asking for the
+   * transpose would hand back a squashed picture. Even dimensions because
+   * hardware scalers dislike odd ones.
+   */
+  if (!(resolution.width > 0 && resolution.height > 0) && item->maxLongSide > 0) {
+    CGSize natural = videoTrack.naturalSize;
+    CGFloat longest = MAX(natural.width, natural.height);
+    if (longest > item->maxLongSide) {
+      CGFloat scale = item->maxLongSide / longest;
+      resolution = CGSizeMake(MAX(2, round(natural.width * scale / 2) * 2),
+                              MAX(2, round(natural.height * scale / 2) * 2));
+    }
+  }
   if (resolution.width > 0 && resolution.height > 0) {
     pixBuffAttributes =
         [NSMutableDictionary dictionaryWithDictionary:pixBuffAttributes];

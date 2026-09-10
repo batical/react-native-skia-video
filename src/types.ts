@@ -205,8 +205,25 @@ export type VideoCompositionVideoItem = VideoCompositionItemBase & {
    * If provided, the resolution to scale the video to.
    * If not provided, the original resolution of the video will be used.
    * Downscaling the video can improve performance.
+   *
+   * Given in the file's *encoded* orientation, which for a portrait clip is
+   * the transpose of what it displays as — prefer `maxLongSide` unless an
+   * exact pixel size is needed. iOS only; Android decodes at the file's size.
    */
   resolution?: { width: number; height: number };
+  /**
+   * If provided, the longest side the frames are decoded at, keeping the
+   * file's own aspect. Ignored when `resolution` is set, and never upscales.
+   *
+   * This is what playback costs in memory: frames are BGRA and the player
+   * keeps four of them, so an uncapped 4K clip holds 133 MB of buffers however
+   * small it is drawn. Resolved inside the decoder, the only place that knows
+   * the encoded orientation — so unlike `resolution`, this cannot squash a
+   * rotated clip.
+   *
+   * iOS only, as `resolution` is.
+   */
+  maxLongSide?: number;
   /**
    * If set, the audio track of the video file will be played (during
    * playback) and mixed into the exported video (during export), following
