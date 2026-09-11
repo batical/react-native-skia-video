@@ -23,11 +23,25 @@ VideoFrame::VideoFrame(CVPixelBufferRef pixelBuffer, double width,
   this->rotation = rotation;
 }
 
+VideoFrame::VideoFrame(id<MTLTexture> borrowedTexture, double width,
+                       double height, int rotation) {
+  // Copy mode: the producer owns this texture and keeps it valid; nothing
+  // here is released by this frame.
+  this->mtlTexture = borrowedTexture;
+  this->ownsResources = false;
+  this->width = width;
+  this->height = height;
+  this->rotation = rotation;
+}
+
 VideoFrame::~VideoFrame() {
   releaseBuffer();
 }
 
 void VideoFrame::releaseTextureLocked() {
+  if (!ownsResources) {
+    return;
+  }
   mtlTexture = nil;
   if (cvMetalTexture) {
     CFRelease(cvMetalTexture);
@@ -37,6 +51,9 @@ void VideoFrame::releaseTextureLocked() {
 
 void VideoFrame::releaseBufferLocked() {
   releaseTextureLocked();
+  if (!ownsResources) {
+    return;
+  }
   if (pixelBuffer) {
     CVPixelBufferRelease(pixelBuffer);
     pixelBuffer = NULL;
@@ -50,6 +67,9 @@ void VideoFrame::releaseTexture() {
 
 bool VideoFrame::tryReleaseBuffer() {
   std::lock_guard<std::mutex> guard(mutex);
+  if (!ownsResources) {
+    return true;
+  }
   // Our own texture view must go first: it pins the surface's use count.
   releaseTextureLocked();
   if (!pixelBuffer) {

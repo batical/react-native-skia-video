@@ -13,6 +13,7 @@ class VideoCompositionItemDecoder {
 public:
   VideoCompositionItemDecoder(std::shared_ptr<VideoCompositionItem> item,
                               bool realTime, AVURLAsset* sharedAsset = nil);
+  ~VideoCompositionItemDecoder();
   void advanceDecoder(CMTime currentTime);
   void seekTo(CMTime currentTime);
   std::shared_ptr<VideoFrame> acquireFrameForTime(CMTime currentTime,
@@ -35,12 +36,18 @@ private:
   std::list<std::pair<double, CMSampleBufferRef>> nextLoopFrames;
   CMTime lastRequestedTime = kCMTimeInvalid;
   std::shared_ptr<VideoFrame> currentFrame;
-  // Bounds the lifetime of the frames handed to JS; never depends on the JS
-  // garbage collector (see VideoFrame.h).
+  // Bounds the lifetime of the frames handed to JS in direct mode; never
+  // depends on the JS garbage collector (see VideoFrame.h). Unused in copy
+  // mode, where the frames own nothing.
   VideoFrameRing frameRing;
+  // Copy mode (the default): every decoded frame is copied into this one
+  // texture, which the decoder owns for its whole life.
+  bool directTexture = false;
+  id<MTLTexture> persistentTexture;
 
   void setupReader(CMTime initialTime);
   double mapSourceTimeToTarget(CMTime sourceTime);
+  std::shared_ptr<VideoFrame> makeFrame(CVPixelBufferRef buffer);
 };
 
 } // namespace RNSkiaVideo

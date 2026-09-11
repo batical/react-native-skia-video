@@ -30,7 +30,17 @@ using namespace facebook;
  */
 class JSI_EXPORT VideoFrame : public jsi::HostObject {
 public:
+  /** Direct mode (`textureMode: 'direct'`): the frame owns the buffer. */
   VideoFrame(CVPixelBufferRef pixelBuffer, double width, double height,
+             int rotation);
+  /**
+   * Copy mode (`textureMode: 'copy'`, the default): the decoded pixels were
+   * copied into a persistent texture the producer owns and reuses, so this
+   * frame owns nothing and outlives no pixels of its own — the texture holds
+   * whatever the producer last copied into it. This is the pre-zero-copy
+   * behaviour, kept as the default and selectable per player and per item.
+   */
+  VideoFrame(id<MTLTexture> borrowedTexture, double width, double height,
              int rotation);
   ~VideoFrame() override;
 
@@ -67,6 +77,9 @@ private:
   CVPixelBufferRef pixelBuffer = NULL;
   CVMetalTextureRef cvMetalTexture = NULL;
   id<MTLTexture> mtlTexture;
+  // Copy mode: the texture belongs to the producer, so none of the release
+  // methods below touch it and the frame never enters a ring.
+  bool ownsResources = true;
   double width;
   double height;
   int rotation;

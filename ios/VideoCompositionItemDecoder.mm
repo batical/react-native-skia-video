@@ -1,6 +1,7 @@
 #include "VideoCompositionItemDecoder.h"
 
 #import "AVAssetTrackUtils.h"
+#import "MTLTextureUtils.h"
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
 
@@ -16,6 +17,7 @@ VideoCompositionItemDecoder::VideoCompositionItemDecoder(
     : frameRing(realTime ? kPreviewFrameRingDepth : 1) {
   this->item = item;
   this->realTime = realTime;
+  this->directTexture = item->directTexture;
   lock = [[NSObject alloc] init];
   NSString* path =
       [NSString stringWithCString:item->path.c_str()
@@ -252,11 +254,20 @@ VideoCompositionItemDecoder::acquireFrameForTime(CMTime currentTime,
     }
   }
   if (nextFrame) {
+    CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(nextFrame);
+    auto frame = makeFrame(buffer);
+    CFRelease(nextFrame);
+    return frame;
+  }
+  return nullptr;
+}
+
+std::shared_ptr<VideoFrame>
+VideoCompositionItemDecoder::makeFrame(CVPixelBufferRef buffer) {
+  if (directTexture) {
     // Zero-copy: the frame wraps the decoder's pixel buffer directly (and
     // retains it); no intermediate texture, no blit, no CPU/GPU sync.
-    CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(nextFrame);
     auto frame = std::make_shared<VideoFrame>(buffer, width, height, rotation);
-    CFRelease(nextFrame);
     // Deterministic lifetime (see VideoFrame.h): frames older than the ring
     // lose their texture immediately, and their buffer returns to the pool as
     // soon as nothing reads it anymore. Stale JS wrappers see an undefined
@@ -264,7 +275,19 @@ VideoCompositionItemDecoder::acquireFrameForTime(CMTime currentTime,
     frameRing.push(frame);
     return frame;
   }
-  return nullptr;
+  // Copy mode (default): the pixels go into one texture this decoder owns, so
+  // a frame stays readable until the next one overwrites it and the decoder's
+  // buffer goes straight back to its pool.
+  if (!persistentTexture) {
+    persistentTexture = [MTLTextureUtils
+        createPersistentTextureOfSize:CGSizeMake(width, height)];
+    if (!persistentTexture) {
+      throw std::runtime_error("Failed to create persistent Metal texture!");
+    }
+  }
+  [MTLTextureUtils copyPixelBuffer:buffer intoTexture:persistentTexture];
+  return std::make_shared<VideoFrame>(persistentTexture, width, height,
+                                      rotation);
 }
 
 void VideoCompositionItemDecoder::seekTo(CMTime currentTime) {
@@ -292,6 +315,17 @@ void VideoCompositionItemDecoder::release() {
     hasLooped = false;
     lastRequestedTime = kCMTimeInvalid;
     currentFrame = nullptr;
+  }
+}
+
+VideoCompositionItemDecoder::~VideoCompositionItemDecoder() {
+  @synchronized(lock) {
+    // Copy mode only: hand the texture's memory back without waiting for ARC
+    // to get around to it.
+    if (persistentTexture) {
+      [persistentTexture setPurgeableState:MTLPurgeableStateEmpty];
+      persistentTexture = nil;
+    }
   }
 }
 

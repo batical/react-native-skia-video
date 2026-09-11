@@ -1,5 +1,5 @@
 import { type SharedValue } from 'react-native-reanimated';
-import type { BufferingRange, VideoDimensions, VideoFrame, VideoPlayer } from './types.js';
+import type { BufferingRange, VideoDimensions, VideoFrame, VideoPlayer, VideoTextureMode } from './types.js';
 type UseVideoPlayerOptions = {
     /**
      * The URI of the video to play.
@@ -16,6 +16,12 @@ type UseVideoPlayerOptions = {
         width: number;
         height: number;
     } | null;
+    /**
+     * How the decoded frames reach Skia on iOS, see `VideoTextureMode`.
+     * Changing it re-creates the video player. Ignored on Android.
+     * @default 'copy'
+     */
+    textureMode?: VideoTextureMode;
     /**
      * Whether the video should start playing automatically.
      */
@@ -88,6 +94,6 @@ type UseVideoPlayerReturnType = {
  * @param options The options for the video player.
  * @returns
  */
-export declare const useVideoPlayer: ({ uri, resolution, autoPlay, isLooping, volume, playbackSpeed, onReadyToPlay, onBufferingStart, onBufferingEnd, onBufferingUpdate, onComplete, onError, onPlayingStatusChange, onSeekComplete, }: UseVideoPlayerOptions) => UseVideoPlayerReturnType;
+export declare const useVideoPlayer: ({ uri, resolution, textureMode, autoPlay, isLooping, volume, playbackSpeed, onReadyToPlay, onBufferingStart, onBufferingEnd, onBufferingUpdate, onComplete, onError, onPlayingStatusChange, onSeekComplete, }: UseVideoPlayerOptions) => UseVideoPlayerReturnType;
 export {};
 //# sourceMappingURL=videoPlayer.d.ts.map

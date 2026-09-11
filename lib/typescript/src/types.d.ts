@@ -55,6 +55,34 @@ export type BufferingRange = {
     duration: number;
 };
 /**
+ * How decoded frames reach Skia on iOS.
+ *
+ * - `copy` (default): every decoded frame is copied on the GPU into one
+ *   texture the player (or the item decoder) owns and reuses. A frame stays
+ *   readable until the next one overwrites it. This is the historical
+ *   behaviour.
+ * - `direct`: the decoder's own pixel buffer is handed to Skia through a Metal
+ *   texture view, with no per-frame copy and no GPU wait. Faster and lighter,
+ *   but a frame is only valid for the tick it is handed out in: its `texture`
+ *   becomes `undefined` once newer frames have been decoded.
+ *
+ * Ignored on Android, which always renders through its own GL pipeline.
+ */
+export type VideoTextureMode = 'copy' | 'direct';
+/**
+ * How rendered frames reach the video encoder during an export on iOS.
+ *
+ * - `copy` (default): each frame is copied on the GPU into a CPU readable
+ *   texture, read back into a pixel buffer, then appended. The historical
+ *   behaviour.
+ * - `direct`: each frame is blitted once, on the GPU, straight into the
+ *   encoder's pixel buffer. One full frame copy and one GPU wait less per
+ *   frame.
+ *
+ * Ignored on Android.
+ */
+export type VideoEncoderMode = 'copy' | 'direct';
+/**
  * The video player interface.
  */
 export type VideoPlayer = {
@@ -212,6 +240,13 @@ export type VideoCompositionVideoItem = VideoCompositionItemBase & {
      * iOS only, as `resolution` is.
      */
     maxLongSide?: number;
+    /**
+     * How this item's frames reach Skia on iOS, see {@link VideoTextureMode}.
+     *
+     * @default 'copy'
+     * @platform ios
+     */
+    textureMode?: VideoTextureMode;
     /**
      * If set, the audio track of the video file will be played (during
      * playback) and mixed into the exported video (during export), following
@@ -432,6 +467,13 @@ export type ExportOptions = {
      */
     encoderName?: string | null;
     /**
+     * How rendered frames reach the encoder, see {@link VideoEncoderMode}.
+     *
+     * @default 'copy'
+     * @platform ios
+     */
+    encoderMode?: VideoEncoderMode;
+    /**
      * The bit rate of the exported audio track in bits per second.
      * Only used if the composition contains audio.
      * @default 128000
@@ -463,6 +505,8 @@ export type RNSkiaVideoModule = {
     createVideoPlayer: (uri: string, resolution?: {
         width: number;
         height: number;
+    } | null, options?: {
+        textureMode?: VideoTextureMode;
     } | null) => VideoPlayer;
     /**
      * Creates a video composition frames extractor for the specified video composition.
