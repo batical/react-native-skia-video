@@ -39,6 +39,15 @@ type UseVideoCompositionPlayerOptions<T = undefined> = {
      */
     isLooping?: boolean;
     /**
+     * Whether to keep calling `drawFrame` at every vsync while playback is
+     * paused. By default a paused player only redraws when the composition time
+     * or the decoded frames change (a seek, the frame that follows it), which
+     * saves GPU time and battery. Enable it if `drawFrame` depends on values
+     * that change while paused, an overlay being dragged for instance.
+     * @default false
+     */
+    drawWhenPaused?: boolean;
+    /**
      * Callback that is called when the composition is ready to play.
      */
     onReadyToPlay?: () => void;
@@ -67,6 +76,6 @@ type UseVideoCompositionPlayerReturnType = {
 /**
  * A hook that creates a video composition player.
  */
-export declare const useVideoCompositionPlayer: ({ composition, drawFrame, beforeDrawFrame, afterDrawFrame, width, height, autoPlay, isLooping, onReadyToPlay, onComplete, onError, }: UseVideoCompositionPlayerOptions) => UseVideoCompositionPlayerReturnType;
+export declare const useVideoCompositionPlayer: <T = undefined>({ composition, drawFrame, beforeDrawFrame, afterDrawFrame, width, height, autoPlay, isLooping, drawWhenPaused, onReadyToPlay, onComplete, onError, }: UseVideoCompositionPlayerOptions<T>) => UseVideoCompositionPlayerReturnType;
 export {};
 //# sourceMappingURL=videoCompositionPlayer.d.ts.map

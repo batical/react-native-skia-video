@@ -267,6 +267,12 @@ public class VideoEncoder {
     if (!eglResourcesHolder.swapBuffers()) {
       throw new RuntimeException("eglSwapBuffer failed");
     }
+    // The quad above samples the Skia surface texture from this context, and
+    // the export loop draws the next frame into that very texture from Skia's
+    // context as soon as this method returns. GPU ordering across contexts is
+    // not guaranteed (Mali runs contexts concurrently): the native caller
+    // inserts an EGL fence right after this method and makes Skia's context
+    // wait for it on the GPU (see android/cpp/EGLFence.cpp).
     drainEncoder(false);
   }
 
@@ -345,14 +351,19 @@ public class VideoEncoder {
    * @param endOfStream true if this is the end of the stream
    */
   private void drainEncoder(boolean endOfStream) {
-    final int TIMEOUT_USEC = 10000;
+    // Wait for output only when flushing the stream at the end. During the
+    // export the encoder runs a few frames behind its input, so a positive
+    // timeout blocks the export thread for that long on every frame whose
+    // output is not ready yet; what is not ready now is drained with the next
+    // frame.
+    final int timeoutUsec = endOfStream ? 10000 : 0;
 
     if (endOfStream) {
       encoder.signalEndOfInputStream();
     }
 
     while (true) {
-      int encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC);
+      int encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, timeoutUsec);
       if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
         // no output available yet
         if (!endOfStream) {
@@ -418,7 +429,14 @@ public class VideoEncoder {
       audioThread = null;
     }
     if (eglResourcesHolder != null) {
+      if (textureRenderer != null) {
+        // The program can only be deleted with the encoder's context current;
+        // on the export thread the Skia context is the one bound here.
+        eglResourcesHolder.runWithContextCurrent(textureRenderer::release);
+        textureRenderer = null;
+      }
       eglResourcesHolder.release();
+      eglResourcesHolder = null;
     }
     if (encoder != null) {
       try {
