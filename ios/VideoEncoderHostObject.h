@@ -15,7 +15,8 @@ public:
                          int frameRate, int bitRate, std::string codec,
                          int audioBitRate, int audioSampleRate,
                          int audioChannelCount,
-                         std::shared_ptr<VideoComposition> composition);
+                         std::shared_ptr<VideoComposition> composition,
+                         bool directEncoder);
 
   /**
    * Whether the device has an encoder for the given codec ("h264" or "hevc").
@@ -36,8 +37,14 @@ private:
   int audioSampleRate;
   int audioChannelCount;
   std::shared_ptr<VideoComposition> composition;
+  // `encoderMode: 'direct'` blits the rendered texture straight into the
+  // encoder's pixel buffer on the GPU. `'copy'` (the default) goes through a
+  // CPU readable texture and getBytes, as before.
+  bool directEncoder = false;
   id<MTLDevice> device;
   id<MTLCommandQueue> commandQueue;
+  // Copy mode only: the CPU readable staging texture every frame goes through.
+  id<MTLTexture> cpuAccessibleTexture;
   AVAssetWriter* assetWriter;
   AVAssetWriterInput* assetWriterInput;
   CVPixelBufferPoolRef pixelBufferPool = NULL;
@@ -51,6 +58,10 @@ private:
 
   void prepare();
   void encodeFrame(id<MTLTexture> mlTexture, CMTime time);
+  void fillPixelBufferDirect(id<MTLTexture> mlTexture,
+                             CVPixelBufferRef pixelBuffer);
+  void fillPixelBufferCopy(id<MTLTexture> mlTexture,
+                           CVPixelBufferRef pixelBuffer);
   void setupAudio();
   void startWritingAudio();
   void finish();

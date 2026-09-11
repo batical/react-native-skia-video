@@ -31,6 +31,23 @@ NS_ASSUME_NONNULL_BEGIN
     (CVPixelBufferRef)pixelBuffer;
 
 /**
+ * Copy mode (`textureMode: 'copy'`): a private texture the producer owns and
+ * every decoded frame is copied into, so a frame handed to JS stays readable
+ * until the next one replaces its contents. One texture per producer, not one
+ * per frame.
+ */
++ (nullable id<MTLTexture>)createPersistentTextureOfSize:(CGSize)size;
+
+/**
+ * Copy mode: blits the pixel buffer into the persistent texture through the
+ * texture cache, and waits for the GPU so the texture is readable when this
+ * returns. Throws std::runtime_error if the buffer cannot be wrapped or is
+ * larger than the destination.
+ */
++ (void)copyPixelBuffer:(CVPixelBufferRef)pixelBuffer
+              intoTexture:(id<MTLTexture>)texture;
+
+/**
  * Releases the cache's own references to the textures nobody holds anymore.
  * CoreVideo requires this to be called periodically: until it runs, the
  * cache keeps every IOSurface it has vended a texture for alive, which stops

@@ -21,6 +21,12 @@ public:
    * picture. See VideoCompositionItemDecoder#setupReader.
    */
   double maxLongSide = 0;
+  /**
+   * `textureMode: 'direct'` hands Skia the decoder's own pixel buffers,
+   * without the per-frame copy into a persistent texture that `'copy'` (the
+   * default) does. iOS only.
+   */
+  bool directTexture = false;
   bool isVideo = true;
   bool audioEnabled = false;
   double audioVolume = 1.0;
@@ -75,6 +81,14 @@ public:
         auto capProp = jsItem.getProperty(runtime, "maxLongSide");
         if (capProp.isNumber()) {
           item->maxLongSide = capProp.asNumber();
+        }
+      }
+
+      if (jsItem.hasProperty(runtime, "textureMode")) {
+        auto modeProp = jsItem.getProperty(runtime, "textureMode");
+        if (modeProp.isString()) {
+          item->directTexture =
+              modeProp.asString(runtime).utf8(runtime) == "direct";
         }
       }
 

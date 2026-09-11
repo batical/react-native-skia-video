@@ -6,6 +6,7 @@
 //
 
 #import "VideoPlayerHostObject.h"
+#import "MTLTextureUtils.h"
 #import "RNSVJSIUtils.h"
 
 namespace RNSkiaVideo {
@@ -13,8 +14,8 @@ using namespace facebook;
 
 VideoPlayerHostObject::VideoPlayerHostObject(
     jsi::Runtime& runtime, std::shared_ptr<react::CallInvoker> callInvoker,
-    NSURL* url, CGSize resolution)
-    : EventEmitter(runtime, callInvoker) {
+    NSURL* url, CGSize resolution, bool directTexture)
+    : EventEmitter(runtime, callInvoker), directTexture(directTexture) {
   playerDelegate =
       [[RNSVSkiaVideoPlayerDelegateImpl alloc] initWithHost:this
                                                     runtime:&runtime];
@@ -67,13 +68,8 @@ jsi::Value VideoPlayerHostObject::get(jsi::Runtime& runtime,
             return jsi::Value::null();
           }
           lastFrameDrawn = lastFrameAvailable;
-          currentFrame =
-              std::make_shared<VideoFrame>(buffer, width, height, rotation);
+          currentFrame = makeFrame(buffer);
           CVPixelBufferRelease(buffer);
-          // Deterministic lifetime (see VideoFrame.h): retire frames older
-          // than the ring and give their buffer back to the player's pool as
-          // soon as nothing reads it anymore.
-          frameRing.push(currentFrame);
           return jsi::Object::createFromHostObject(runtime, currentFrame);
         });
   } else if (propName == "play") {
@@ -204,10 +200,39 @@ void VideoPlayerHostObject::readyToPlay(float width, float height,
   this->rotation = rotation;
 }
 
+std::shared_ptr<VideoFrame>
+VideoPlayerHostObject::makeFrame(CVPixelBufferRef buffer) {
+  if (directTexture) {
+    // Zero-copy: the frame wraps the player's pixel buffer directly (and
+    // retains it). Deterministic lifetime (see VideoFrame.h): retire frames
+    // older than the ring and give their buffer back to the player's pool as
+    // soon as nothing reads it anymore.
+    auto frame = std::make_shared<VideoFrame>(buffer, width, height, rotation);
+    frameRing.push(frame);
+    return frame;
+  }
+  // Copy mode (default): the pixels go into one texture this player owns, so
+  // a frame stays readable until the next one overwrites it.
+  size_t bufferWidth = CVPixelBufferGetWidth(buffer);
+  size_t bufferHeight = CVPixelBufferGetHeight(buffer);
+  if (!persistentTexture || persistentTexture.width != bufferWidth ||
+      persistentTexture.height != bufferHeight) {
+    persistentTexture = [MTLTextureUtils
+        createPersistentTextureOfSize:CGSizeMake(bufferWidth, bufferHeight)];
+  }
+  [MTLTextureUtils copyPixelBuffer:buffer intoTexture:persistentTexture];
+  return std::make_shared<VideoFrame>(persistentTexture, width, height,
+                                      rotation);
+}
+
 void VideoPlayerHostObject::release() {
   if (!released.test_and_set()) {
     removeAllListeners();
     frameRing.releaseAll();
+    if (persistentTexture) {
+      [persistentTexture setPurgeableState:MTLPurgeableStateEmpty];
+      persistentTexture = nil;
+    }
     if (currentFrame) {
       currentFrame = nullptr;
     }

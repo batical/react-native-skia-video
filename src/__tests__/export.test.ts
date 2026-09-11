@@ -163,6 +163,21 @@ describe('exportVideoComposition', () => {
     expect(createVideoEncoder.mock.calls[0]?.[1]).toBe(composition);
   });
 
+  it('forwards encoderMode to the native encoder, and nothing by default', async () => {
+    await runExport();
+    expect(createVideoEncoder.mock.calls[0]?.[0].encoderMode).toBeUndefined();
+
+    await runExport({ encoderMode: 'direct' });
+    expect(createVideoEncoder.mock.calls[1]?.[0]).toMatchObject({
+      encoderMode: 'direct',
+    });
+
+    await runExport({ encoderMode: 'copy' });
+    expect(createVideoEncoder.mock.calls[2]?.[0]).toMatchObject({
+      encoderMode: 'copy',
+    });
+  });
+
   it('reuses the surface across exports and rebuilds it when the size changes', async () => {
     await runExport();
     await runExport();

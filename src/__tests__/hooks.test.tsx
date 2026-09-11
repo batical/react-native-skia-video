@@ -189,13 +189,33 @@ describe('useVideoPlayer', () => {
     return { player, ...rendered };
   };
 
-  it('creates the native player for the uri', () => {
+  it('creates the native player for the uri, without a texture mode by default', () => {
     setup();
     expect(createVideoPlayer).toHaveBeenCalledTimes(1);
+    // No third argument: the native side keeps its own default, `copy`.
     expect(createVideoPlayer).toHaveBeenCalledWith(
       'file:///videos/clip.mp4',
+      undefined,
       undefined
     );
+  });
+
+  it('passes textureMode to the native player and re-creates it on change', () => {
+    const { player, rerender } = setup({ textureMode: 'direct' });
+    expect(createVideoPlayer).toHaveBeenLastCalledWith(
+      'file:///videos/clip.mp4',
+      undefined,
+      { textureMode: 'direct' }
+    );
+
+    rerender({ uri: 'file:///videos/clip.mp4', textureMode: 'copy' });
+    expect(createVideoPlayer).toHaveBeenCalledTimes(2);
+    expect(createVideoPlayer).toHaveBeenLastCalledWith(
+      'file:///videos/clip.mp4',
+      undefined,
+      { textureMode: 'copy' }
+    );
+    expect(player.dispose).toHaveBeenCalledTimes(1);
   });
 
   it('re-creates the player when the resolution changes and disposes the old one', () => {
@@ -204,7 +224,8 @@ describe('useVideoPlayer', () => {
     });
     expect(createVideoPlayer).toHaveBeenLastCalledWith(
       'file:///videos/clip.mp4',
-      { width: 640, height: 360 }
+      { width: 640, height: 360 },
+      undefined
     );
 
     rerender({
@@ -214,7 +235,8 @@ describe('useVideoPlayer', () => {
     expect(createVideoPlayer).toHaveBeenCalledTimes(2);
     expect(createVideoPlayer).toHaveBeenLastCalledWith(
       'file:///videos/clip.mp4',
-      { width: 320, height: 180 }
+      { width: 320, height: 180 },
+      undefined
     );
     expect(player.dispose).toHaveBeenCalledTimes(1);
   });

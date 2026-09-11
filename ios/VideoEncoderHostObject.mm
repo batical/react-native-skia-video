@@ -19,7 +19,9 @@ namespace RNSkiaVideo {
 VideoEncoderHostObject::VideoEncoderHostObject(
     std::string outPath, int width, int height, int frameRate, int bitRate,
     std::string codec, int audioBitRate, int audioSampleRate,
-    int audioChannelCount, std::shared_ptr<VideoComposition> composition) {
+    int audioChannelCount, std::shared_ptr<VideoComposition> composition,
+    bool directEncoder) {
+  this->directEncoder = directEncoder;
   this->outPath = outPath;
   this->width = width;
   this->height = height;
@@ -213,28 +215,31 @@ void VideoEncoderHostObject::prepare() {
     throw createErrorWithMessage(@"Could not create pixel buffer pool");
     return;
   }
+
+  if (!directEncoder) {
+    // Copy mode: the staging texture the GPU writes and the CPU reads.
+    MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                     width:width
+                                    height:height
+                                 mipmapped:NO];
+    descriptor.storageMode = MTLStorageModeShared;
+    cpuAccessibleTexture = [device newTextureWithDescriptor:descriptor];
+    if (!cpuAccessibleTexture) {
+      throw createErrorWithMessage(@"Could not create encoder staging texture");
+    }
+  }
 }
 
-void VideoEncoderHostObject::encodeFrame(id<MTLTexture> mlTexture,
-                                         CMTime time) {
-  // Vend a fresh buffer from the pool for every frame so the pixels written
-  // below can never be overwritten while a previous frame is still being
-  // encoded. The pool only recycles a buffer once every reference to it
-  // (the encoder's included) is gone.
-  CVPixelBufferRef pixelBuffer = NULL;
-  CVReturn status = CVPixelBufferPoolCreatePixelBuffer(
-      kCFAllocatorDefault, pixelBufferPool, &pixelBuffer);
-  if (status != kCVReturnSuccess || pixelBuffer == NULL) {
-    throw createErrorWithMessage(@"Could not allocate pixel buffer from pool");
-  }
-
-  // Blit the rendered texture straight into the buffer's IOSurface through a
-  // zero-copy Metal view: the GPU writes the very memory the video encoder
-  // will read — no CPU-accessible staging texture, no getBytes round-trip.
+// Direct mode: blit the rendered texture straight into the buffer's IOSurface
+// through a zero-copy Metal view — the GPU writes the very memory the video
+// encoder will read, with no CPU-accessible staging texture and no getBytes
+// round-trip.
+void VideoEncoderHostObject::fillPixelBufferDirect(
+    id<MTLTexture> mlTexture, CVPixelBufferRef pixelBuffer) {
   CVMetalTextureRef cvMetalTexture =
       [MTLTextureUtils createTextureViewForPixelBuffer:pixelBuffer];
   if (!cvMetalTexture) {
-    CVPixelBufferRelease(pixelBuffer);
     throw createErrorWithMessage(
         @"Could not create Metal view over encoder pixel buffer");
   }
@@ -268,6 +273,70 @@ void VideoEncoderHostObject::encodeFrame(id<MTLTexture> mlTexture,
   // pins every buffer it has vended a texture for, the pool can never recycle
   // one, and a long export allocates a fresh full-resolution buffer per frame.
   [MTLTextureUtils flushTextureCache];
+}
+
+// Copy mode (the default): the rendered texture goes through a CPU readable
+// staging texture, and its bytes are read into the pixel buffer. One extra
+// full frame copy and one extra GPU wait per frame compared to direct mode,
+// but it touches neither the texture cache nor the buffer's IOSurface.
+void VideoEncoderHostObject::fillPixelBufferCopy(id<MTLTexture> mlTexture,
+                                                 CVPixelBufferRef pixelBuffer) {
+  MTLSize copySize =
+      MTLSizeMake(MIN(mlTexture.width, cpuAccessibleTexture.width),
+                  MIN(mlTexture.height, cpuAccessibleTexture.height), 1);
+  id<MTLCommandBuffer> commandBuffer =
+      [commandQueue commandBufferWithUnretainedReferences];
+  id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+  [blitEncoder copyFromTexture:mlTexture
+                   sourceSlice:0
+                   sourceLevel:0
+                  sourceOrigin:MTLOriginMake(0, 0, 0)
+                    sourceSize:copySize
+                     toTexture:cpuAccessibleTexture
+              destinationSlice:0
+              destinationLevel:0
+             destinationOrigin:MTLOriginMake(0, 0, 0)];
+  [blitEncoder endEncoding];
+  [commandBuffer commit];
+  [commandBuffer waitUntilCompleted];
+
+  CVPixelBufferLockBaseAddress(pixelBuffer, 0);
+  void* pixelBufferBytes = CVPixelBufferGetBaseAddress(pixelBuffer);
+  if (pixelBufferBytes == NULL) {
+    CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+    throw createErrorWithMessage(@"Could not extract pixels from frame");
+  }
+  size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
+  [cpuAccessibleTexture getBytes:pixelBufferBytes
+                     bytesPerRow:bytesPerRow
+                      fromRegion:MTLRegionMake2D(0, 0, width, height)
+                     mipmapLevel:0];
+  CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+}
+
+void VideoEncoderHostObject::encodeFrame(id<MTLTexture> mlTexture,
+                                         CMTime time) {
+  // Vend a fresh buffer from the pool for every frame so the pixels written
+  // below can never be overwritten while a previous frame is still being
+  // encoded. The pool only recycles a buffer once every reference to it
+  // (the encoder's included) is gone.
+  CVPixelBufferRef pixelBuffer = NULL;
+  CVReturn status = CVPixelBufferPoolCreatePixelBuffer(
+      kCFAllocatorDefault, pixelBufferPool, &pixelBuffer);
+  if (status != kCVReturnSuccess || pixelBuffer == NULL) {
+    throw createErrorWithMessage(@"Could not allocate pixel buffer from pool");
+  }
+
+  try {
+    if (directEncoder) {
+      fillPixelBufferDirect(mlTexture, pixelBuffer);
+    } else {
+      fillPixelBufferCopy(mlTexture, pixelBuffer);
+    }
+  } catch (...) {
+    CVPixelBufferRelease(pixelBuffer);
+    throw;
+  }
 
   int attempt = 0;
   while (!assetWriterInput.isReadyForMoreMediaData) {
@@ -494,6 +563,10 @@ void VideoEncoderHostObject::release() {
   }
   // Release the last surfaces the cache still holds for this export.
   [MTLTextureUtils flushTextureCache];
+  if (cpuAccessibleTexture) {
+    [cpuAccessibleTexture setPurgeableState:MTLPurgeableStateEmpty];
+    cpuAccessibleTexture = nil;
+  }
   commandQueue = nil;
   device = nil;
 }
