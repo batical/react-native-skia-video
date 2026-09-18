@@ -4,7 +4,12 @@ import {
   scheduleOnRN,
   type WorkletRuntime,
 } from 'react-native-worklets';
-import { Skia, BlendMode } from '@shopify/react-native-skia';
+import {
+  Skia,
+  BlendMode,
+  ColorType,
+  AlphaType,
+} from '@shopify/react-native-skia';
 import type { SkSurface } from '@shopify/react-native-skia';
 import type {
   ExportOptions,
@@ -21,6 +26,17 @@ const Promise = global.Promise;
 const DEFAULT_AUDIO_BIT_RATE = 128000;
 const DEFAULT_AUDIO_SAMPLE_RATE = 44100;
 const DEFAULT_AUDIO_CHANNEL_COUNT = 2;
+
+// Read back after every frame, as the GPU wait: flush() only submits (it
+// takes no sync argument), the encoder blits from another command queue, and
+// a readback is the one synchronous wait Skia exposes to JS. Without it frame
+// 0 — nothing ahead of it on the GPU — was read before it was drawn: black.
+const GPU_SYNC_PIXEL = {
+  width: 1,
+  height: 1,
+  colorType: ColorType.RGBA_8888,
+  alphaType: AlphaType.Premul,
+};
 
 // The standard abort behavior is to reject with `signal.reason`. React
 // Native's AbortController polyfill (`abort-controller`) predates `reason`,
@@ -204,10 +220,8 @@ export const exportVideoComposition = async <T = undefined>({
                 width: options.width,
                 height: options.height,
               });
-              // Synchronous flush: block until the GPU is done rendering the
-              // frame, since the encoder reads the surface's texture from its
-              // own command queue / GL context.
-              currentSurface.flush(true);
+              currentSurface.flush();
+              canvas.readPixels(0, 0, GPU_SYNC_PIXEL);
               const texture = currentSurface.getNativeTextureUnstable();
               currentEncoder.encodeFrame(texture, currentTime);
               afterDrawFrame?.(context);

@@ -13,7 +13,12 @@ jest.mock('react-native-worklets', () => ({
   scheduleOnRN: jest.fn(),
   createSynchronizable: jest.fn(),
 }));
-jest.mock('@shopify/react-native-skia', () => ({ Skia: {}, BlendMode: {} }));
+jest.mock('@shopify/react-native-skia', () => ({
+  Skia: {},
+  BlendMode: {},
+  ColorType: { RGBA_8888: 4 },
+  AlphaType: { Premul: 1 },
+}));
 jest.mock('../RNSkiaVideoModule', () => ({
   __esModule: true,
   default: {
