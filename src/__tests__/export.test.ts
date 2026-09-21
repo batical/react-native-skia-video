@@ -214,14 +214,32 @@ describe('exportVideoComposition', () => {
     expect(makeOffscreen).toHaveBeenLastCalledWith(320, 180);
   });
 
-  it('reports progress after each frame', async () => {
+  it('can opt into progress after each frame', async () => {
     const onProgress = jest.fn();
-    await runExport({ onProgress });
+    await runExport({ onProgress, progressIntervalMs: 0 });
     expect(onProgress).toHaveBeenCalledTimes(4);
     expect(onProgress).toHaveBeenLastCalledWith({
       framesCompleted: 4,
       nbFrames: 4,
     });
+  });
+
+  it('throttles progress by wall time and always sends the final frame', async () => {
+    const clock = jest.spyOn(Date, 'now');
+    clock
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(40)
+      .mockReturnValueOnce(110)
+      .mockReturnValueOnce(120);
+    const onProgress = jest.fn();
+    try {
+      await runExport({ onProgress });
+      expect(
+        onProgress.mock.calls.map(([event]) => event.framesCompleted)
+      ).toEqual([1, 3, 4]);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('rejects with an AbortError when the signal is already aborted', async () => {

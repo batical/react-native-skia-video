@@ -4,7 +4,7 @@ import type { ExportOptions, FrameDrawer, VideoComposition } from './types.js';
  *
  * @returns A promise that resolves when the export is complete.
  */
-export declare const exportVideoComposition: <T = undefined>({ videoComposition, drawFrame, beforeDrawFrame, afterDrawFrame, onProgress, abortSignal, ...options }: {
+export declare const exportVideoComposition: <T = undefined>({ videoComposition, drawFrame, beforeDrawFrame, afterDrawFrame, onProgress, progressIntervalMs, abortSignal, ...options }: {
     /**
      * The video composition to export.
      */
@@ -37,5 +37,7 @@ export declare const exportVideoComposition: <T = undefined>({ videoComposition,
         framesCompleted: number;
         nbFrames: number;
     }) => void;
+    /** Minimum wall-clock interval between progress events; 0 emits every frame. */
+    progressIntervalMs?: number;
 } & ExportOptions) => Promise<void>;
 //# sourceMappingURL=exportVideoComposition.d.ts.map
