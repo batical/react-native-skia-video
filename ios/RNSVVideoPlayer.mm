@@ -5,6 +5,7 @@
 
 #import "RNSVVideoPlayer.h"
 #import "AVAssetTrackUtils.h"
+#import "RNSVColorSpace.h"
 
 static void* timeRangeContext = &timeRangeContext;
 static void* statusContext = &statusContext;
@@ -36,22 +37,24 @@ static void* rateContext = &rateContext;
   self.resolution = resolution;
   // IOSurface-backed: the frames are wrapped into Metal texture views without
   // a copy, and their recycling is gated on the surface's use count.
-  NSDictionary* pixBuffAttributes = @{
+  // Output settings rather than plain pixel buffer attributes: the dictionary
+  // takes both, and only this form carries the color properties that make
+  // AVFoundation tone-map an HDR source to Rec.709 (see RNSVColorSpace.h).
+  NSMutableDictionary* outputSettings = [@{
     (id)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA),
     (id)kCVPixelBufferIOSurfacePropertiesKey : @{},
-    (id)kCVPixelBufferMetalCompatibilityKey : @YES
-  };
+    (id)kCVPixelBufferMetalCompatibilityKey : @YES,
+    AVVideoColorPropertiesKey : RNSkiaVideo::SDRColorProperties(),
+  } mutableCopy];
   if (!CGSizeEqualToSize(CGSizeZero, resolution)) {
-    pixBuffAttributes =
-        [NSMutableDictionary dictionaryWithDictionary:pixBuffAttributes];
-    [pixBuffAttributes setValue:@(resolution.width)
-                         forKey:(id)kCVPixelBufferWidthKey];
-    [pixBuffAttributes setValue:@(resolution.height)
-                         forKey:(id)kCVPixelBufferHeightKey];
+    [outputSettings setValue:@(resolution.width)
+                      forKey:(id)kCVPixelBufferWidthKey];
+    [outputSettings setValue:@(resolution.height)
+                      forKey:(id)kCVPixelBufferHeightKey];
   }
 
-  _videoOutput = [[AVPlayerItemVideoOutput alloc]
-      initWithPixelBufferAttributes:pixBuffAttributes];
+  _videoOutput =
+      [[AVPlayerItemVideoOutput alloc] initWithOutputSettings:outputSettings];
 
   _displayLink =
       [CADisplayLink displayLinkWithTarget:self

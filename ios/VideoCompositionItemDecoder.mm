@@ -2,6 +2,7 @@
 
 #import "AVAssetTrackUtils.h"
 #import "MTLTextureUtils.h"
+#import "RNSVColorSpace.h"
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
 
@@ -59,10 +60,15 @@ void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
       CMTimeSubtract(CMTimeMakeWithSeconds(item->duration, NSEC_PER_SEC),
                      position));
 
+  // AVAssetReaderTrackOutput takes pixel buffer attributes and video settings
+  // in the same dictionary, so the color properties travel with them: an HDR
+  // track is tone-mapped to Rec.709 by AVFoundation before we ever see it
+  // (see RNSVColorSpace.h).
   NSDictionary* pixBuffAttributes = @{
     (id)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA),
     (id)kCVPixelBufferIOSurfacePropertiesKey : @{},
-    (id)kCVPixelBufferMetalCompatibilityKey : @YES
+    (id)kCVPixelBufferMetalCompatibilityKey : @YES,
+    AVVideoColorPropertiesKey : SDRColorProperties(),
   };
   CGSize resolution = item->resolution;
   /*

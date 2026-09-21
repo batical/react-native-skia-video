@@ -1,6 +1,7 @@
 #import "VideoEncoderHostObject.h"
 #import "AudioCompositionUtils.h"
 #import "MTLTextureUtils.h"
+#import "RNSVColorSpace.h"
 #import "RNSVJSIUtils.h"
 #import <Metal/Metal.h>
 // VTCopyVideoEncoderList, for asking the device which codecs it can encode
@@ -158,6 +159,9 @@ void VideoEncoderHostObject::prepare() {
     AVVideoCodecKey : isHEVC ? AVVideoCodecTypeHEVC : AVVideoCodecTypeH264,
     AVVideoWidthKey : @(width),
     AVVideoHeightKey : @(height),
+    // The frames come out of Skia in Rec.709; say so in the file rather than
+    // leaving every player to guess (see RNSVColorSpace.h).
+    AVVideoColorPropertiesKey : SDRColorProperties(),
     AVVideoCompressionPropertiesKey : compressionProperties,
   };
 
@@ -326,6 +330,7 @@ void VideoEncoderHostObject::encodeFrame(id<MTLTexture> mlTexture,
   if (status != kCVReturnSuccess || pixelBuffer == NULL) {
     throw createErrorWithMessage(@"Could not allocate pixel buffer from pool");
   }
+  TagBufferAsSDR(pixelBuffer);
 
   try {
     if (directEncoder) {

@@ -46,6 +46,12 @@ await exportVideoComposition({
 | `abortSignal` | `AbortSignal` | Cancels the export; the promise rejects with an `AbortError`. |
 | `beforeDrawFrame` / `afterDrawFrame` | functions | Per-frame context hooks, as in playback. |
 
+:::info Color
+The exported file declares **Rec.709 SDR**, which is what the frames coming out
+of Skia are. HDR sources are tone-mapped at decode, so the export matches the
+preview instead of shifting in whichever player opens it.
+:::
+
 ## Cancellation
 
 ```ts
