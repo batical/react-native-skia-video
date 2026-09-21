@@ -74,6 +74,7 @@ export const exportVideoComposition = async <T = undefined>({
   beforeDrawFrame,
   afterDrawFrame,
   onProgress,
+  progressIntervalMs = 100,
   abortSignal,
   ...options
 }: {
@@ -109,6 +110,8 @@ export const exportVideoComposition = async <T = undefined>({
     framesCompleted: number;
     nbFrames: number;
   }) => void;
+  /** Minimum wall-clock interval between progress events; 0 emits every frame. */
+  progressIntervalMs?: number;
 } & ExportOptions): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     if (abortSignal?.aborted) {
@@ -188,7 +191,13 @@ export const exportVideoComposition = async <T = undefined>({
             );
           frameExtractor.start();
 
-          const nbFrames = videoComposition.duration * options.frameRate;
+          const nbFrames = Math.ceil(
+            videoComposition.duration * options.frameRate
+          );
+          let lastProgressAt = -Infinity;
+          const progressInterval = Number.isFinite(progressIntervalMs)
+            ? Math.max(0, progressIntervalMs)
+            : 100;
           const canvas = surface.getCanvas();
           const clearColor = Skia.Color('#00000000');
           // Each frame runs inside a native autorelease pool: the worklet
@@ -225,7 +234,12 @@ export const exportVideoComposition = async <T = undefined>({
               const texture = currentSurface.getNativeTextureUnstable();
               currentEncoder.encodeFrame(texture, currentTime);
               afterDrawFrame?.(context);
-              if (onProgress) {
+              const now = Date.now();
+              if (
+                onProgress &&
+                (i === nbFrames - 1 || now - lastProgressAt >= progressInterval)
+              ) {
+                lastProgressAt = now;
                 scheduleOnRN(onProgress, {
                   framesCompleted: i + 1,
                   nbFrames,

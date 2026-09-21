@@ -1,5 +1,5 @@
 import type { SkImage } from '@shopify/react-native-skia';
-import { type DerivedValue } from 'react-native-reanimated';
+import { type DerivedValue, type SharedValue } from 'react-native-reanimated';
 import type { FrameDrawer, VideoComposition, VideoCompositionFramesExtractor } from './types.js';
 type UseVideoCompositionPlayerOptions<T = undefined> = {
     /**
@@ -47,6 +47,8 @@ type UseVideoCompositionPlayerOptions<T = undefined> = {
      * @default false
      */
     drawWhenPaused?: boolean;
+    /** Increment after editing a live overlay to redraw a paused composition. */
+    redrawVersion?: SharedValue<number>;
     /**
      * Callback that is called when the composition is ready to play.
      */
@@ -76,6 +78,6 @@ type UseVideoCompositionPlayerReturnType = {
 /**
  * A hook that creates a video composition player.
  */
-export declare const useVideoCompositionPlayer: <T = undefined>({ composition, drawFrame, beforeDrawFrame, afterDrawFrame, width, height, autoPlay, isLooping, drawWhenPaused, onReadyToPlay, onComplete, onError, }: UseVideoCompositionPlayerOptions<T>) => UseVideoCompositionPlayerReturnType;
+export declare const useVideoCompositionPlayer: <T = undefined>({ composition, drawFrame, beforeDrawFrame, afterDrawFrame, width, height, autoPlay, isLooping, drawWhenPaused, redrawVersion, onReadyToPlay, onComplete, onError, }: UseVideoCompositionPlayerOptions<T>) => UseVideoCompositionPlayerReturnType;
 export {};
 //# sourceMappingURL=videoCompositionPlayer.d.ts.map

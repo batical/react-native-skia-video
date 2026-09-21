@@ -5,6 +5,7 @@ import {
   useFrameCallback,
   runOnUI,
   type DerivedValue,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
@@ -62,6 +63,8 @@ type UseVideoCompositionPlayerOptions<T = undefined> = {
    * @default false
    */
   drawWhenPaused?: boolean;
+  /** Increment after editing a live overlay to redraw a paused composition. */
+  redrawVersion?: SharedValue<number>;
   /**
    * Callback that is called when the composition is ready to play.
    */
@@ -107,6 +110,7 @@ export const useVideoCompositionPlayer = <T = undefined>({
   autoPlay = false,
   isLooping = false,
   drawWhenPaused = false,
+  redrawVersion,
   onReadyToPlay,
   onComplete,
   onError,
@@ -171,6 +175,12 @@ export const useVideoCompositionPlayer = <T = undefined>({
   // redrawing an unchanged picture while paused.
   const lastDrawnFramesVersion = useSharedValue(-1);
   const lastDrawnTime = useSharedValue(-1);
+  const lastDrawnRevision = useSharedValue(-1);
+  const drawerRevision = useSharedValue(0);
+  const lastDrawnDrawerRevision = useSharedValue(-1);
+  useEffect(() => {
+    drawerRevision.value += 1;
+  }, [drawFrame, beforeDrawFrame, afterDrawFrame, drawerRevision]);
   const pixelRatio = PixelRatio.get();
 
   // Release the offscreen surface with the hook that made it. Without this a
@@ -219,12 +229,17 @@ export const useVideoCompositionPlayer = <T = undefined>({
     const frames = framesExtractor.decodeCompositionFrames();
     const currentTime = framesExtractor.currentTime;
     const framesVersion = framesExtractor.framesVersion;
+    const revision = redrawVersion?.value ?? 0;
     if (
       !drawWhenPaused &&
       !framesExtractor.isPlaying &&
       currentFrame.value !== null &&
       framesVersion === lastDrawnFramesVersion.value &&
-      currentTime === lastDrawnTime.value
+      currentTime === lastDrawnTime.value &&
+      revision === lastDrawnRevision.value &&
+      drawerRevision.value === lastDrawnDrawerRevision.value &&
+      surfaceWidth.value === pixelWidth &&
+      surfaceHeight.value === pixelHeight
     ) {
       // Paused with nothing new: the image on screen is still exact, and
       // redrawing it at every vsync would only burn GPU time and battery.
@@ -303,6 +318,8 @@ export const useVideoCompositionPlayer = <T = undefined>({
     }
     lastDrawnFramesVersion.value = framesVersion;
     lastDrawnTime.value = currentTime;
+    lastDrawnRevision.value = revision;
+    lastDrawnDrawerRevision.value = drawerRevision.value;
     afterDrawFrame?.(context);
   }, true);
 

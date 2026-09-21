@@ -343,6 +343,34 @@ describe('useVideoCompositionPlayer', () => {
     expect(drawFrame).toHaveBeenCalledTimes(3);
   });
 
+  it('redraws a paused overlay only when its revision changes', () => {
+    const redrawVersion = { value: 0 } as NonNullable<Options['redrawVersion']>;
+    const { drawFrame, extractor, unmount } = setup({ redrawVersion });
+    tick();
+    tick();
+    expect(drawFrame).toHaveBeenCalledTimes(1);
+    redrawVersion.value++;
+    tick();
+    tick();
+    expect(drawFrame).toHaveBeenCalledTimes(2);
+    expect(extractor.prepare).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('redraws paused content after resizing or replacing the drawer', () => {
+    const { drawFrame, rerender, unmount } = setup();
+    tick();
+    rerender({ composition, drawFrame, width: 200, height: 50 });
+    tick();
+    expect(drawFrame).toHaveBeenCalledTimes(2);
+    const replacement = jest.fn();
+    rerender({ composition, drawFrame: replacement, width: 200, height: 50 });
+    tick();
+    tick();
+    expect(replacement).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
   it('keeps drawing while paused when drawWhenPaused is set', () => {
     const { drawFrame } = setup({ drawWhenPaused: true });
     tick();

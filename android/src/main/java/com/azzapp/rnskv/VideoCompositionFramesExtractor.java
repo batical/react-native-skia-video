@@ -26,6 +26,7 @@ public class VideoCompositionFramesExtractor {
   private static final int PLAYBACK_LOOP = 4;
   private static final int PLAYBACK_SEEK = 5;
   private static final int PLAYBACK_RELEASE = 6;
+  private static final int PLAYBACK_FRAME_AVAILABLE = 7;
 
   private final VideoComposition composition;
 
@@ -42,7 +43,7 @@ public class VideoCompositionFramesExtractor {
   private boolean playWhenReady = false;
 
   private boolean prepared;
-  private boolean releasing;
+  private volatile boolean releasing;
   private boolean looping;
 
 
@@ -66,6 +67,13 @@ public class VideoCompositionFramesExtractor {
     playbackThread = new PlaybackThread();
     playbackThread.start();
     handler = new Handler(playbackThread.getLooper(), playbackThread);
+    // A paused seek must still publish the frame when MediaCodec answers.
+    decoder.setOnFrameAvailableListener((item, timeUs) -> {
+      if (releasing) return;
+      if (!handler.hasMessages(PLAYBACK_FRAME_AVAILABLE)) {
+        handler.sendEmptyMessage(PLAYBACK_FRAME_AVAILABLE);
+      }
+    });
   }
 
   public void prepare() {
@@ -189,6 +197,8 @@ public class VideoCompositionFramesExtractor {
     startTime = microTime() - pausePosition;
     isPlaying = true;
     pausePosition = 0;
+    handler.removeMessages(PLAYBACK_LOOP);
+    handler.sendEmptyMessage(PLAYBACK_LOOP);
   }
 
   private void pauseInternal() {
@@ -198,6 +208,7 @@ public class VideoCompositionFramesExtractor {
     }
     pausePosition = getCurrentPosition();
     isPlaying = false;
+    handler.removeMessages(PLAYBACK_LOOP);
     if (audioPlayer != null) {
       audioPlayer.pause();
     }
@@ -227,6 +238,9 @@ public class VideoCompositionFramesExtractor {
     if (audioPlayer != null) {
       audioPlayer.update(getCurrentPosition(), isPlaying);
     }
+    if (!isPlaying) return;
+    // playInternal may have restarted the transport at the loop boundary.
+    handler.removeMessages(PLAYBACK_LOOP);
     long delay = 10;
     long duration = (SystemClock.elapsedRealtime() - loopStartTime);
     delay = delay - duration;
@@ -251,6 +265,8 @@ public class VideoCompositionFramesExtractor {
     } else {
       pausePosition = position;
     }
+    handler.removeMessages(PLAYBACK_LOOP);
+    handler.sendEmptyMessage(PLAYBACK_LOOP);
   }
 
   private void releaseInternal() {
@@ -300,6 +316,10 @@ public class VideoCompositionFramesExtractor {
           }
           case PLAYBACK_SEEK -> {
             seekInternal((Long) msg.obj);
+            return true;
+          }
+          case PLAYBACK_FRAME_AVAILABLE -> {
+            if (prepared && !isPlaying) loopInternal();
             return true;
           }
           case PLAYBACK_RELEASE -> {

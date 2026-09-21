@@ -200,52 +200,73 @@ void VideoCompositionFramesExtractorHostObject::prepare() {
     this->init();
   });
 
+  // At most one decoding pass may be queued or running. Read the latest clock
+  // when it starts rather than accumulating stale display-link ticks.
+  auto decoding = std::make_shared<std::atomic_bool>(false);
   displayLink = [[RNSVDisplayLinkWrapper alloc]
       initWithUpdateBlock:^(CADisplayLink* displayLink) {
+        @synchronized(lock) {
+          if (released.test() || !initialized || (!isPlaying && !needsDecode)) {
+            return;
+          }
+        }
+        if (decoding->exchange(true)) return;
         dispatch_async(decoderQueue, ^{
-          std::vector<std::future<void>> futures;
-          @synchronized(lock) {
-            if (released.test() || !initialized) {
-              return;
-            }
-            auto currentTime = getCurrentTime();
-            if (CMTimeGetSeconds(currentTime) >= composition->duration) {
-              if (!completeEmitted) {
-                completeEmitted = true;
-                emit("complete", jsi::Value::null());
-              }
-              if (isLooping) {
-                currentTime = kCMTimeZero;
-                startDate = [NSDate date];
-                if (audioPlayer) {
-                  [audioPlayer seekToTime:kCMTimeZero
-                          toleranceBefore:kCMTimeZero
-                           toleranceAfter:kCMTimeZero
-                        completionHandler:^(BOOL){
-                        }];
-                }
-              } else {
-                isPlaying = false;
-                if (audioPlayer) {
-                  [audioPlayer pause];
-                }
+          @try {
+            std::vector<std::shared_ptr<VideoCompositionItemDecoder>> decoders;
+            CMTime decodeTime;
+            @synchronized(lock) {
+              if (released.test() || !initialized) {
                 return;
               }
-            } else {
-              completeEmitted = false;
-            }
-            for (const auto& entry : itemDecoders) {
-              auto decoder = entry.second;
-              if (decoder) {
-                futures.push_back(
-                    std::async(std::launch::async, [decoder, currentTime]() {
-                      decoder->advanceDecoder(currentTime);
-                    }));
+              needsDecode = false;
+              auto currentTime = getCurrentTime();
+              if (CMTimeGetSeconds(currentTime) >= composition->duration) {
+                if (!completeEmitted) {
+                  completeEmitted = true;
+                  emit("complete", jsi::Value::null());
+                }
+                if (isLooping) {
+                  currentTime = kCMTimeZero;
+                  startDate = [NSDate date];
+                  if (audioPlayer) {
+                    [audioPlayer seekToTime:kCMTimeZero
+                            toleranceBefore:kCMTimeZero
+                             toleranceAfter:kCMTimeZero
+                          completionHandler:^(BOOL){
+                          }];
+                  }
+                } else {
+                  isPlaying = false;
+                  if (audioPlayer) {
+                    [audioPlayer pause];
+                  }
+                  return;
+                }
+              } else {
+                completeEmitted = false;
+              }
+              decodeTime = currentTime;
+              for (const auto& entry : itemDecoders) {
+                if (entry.second) decoders.push_back(entry.second);
               }
             }
-          }
-          for (auto& future : futures) {
-            future.get();
+            // A single clip decodes on this queue. Multi-clip compositions
+            // retain parallel decoding using GCD's persistent worker pool.
+            if (decoders.size() == 1) {
+              decoders.front()->advanceDecoder(decodeTime);
+            } else if (!decoders.empty()) {
+              dispatch_group_t group = dispatch_group_create();
+              for (const auto& decoder : decoders) {
+                dispatch_group_async(
+                    group, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                      decoder->advanceDecoder(decodeTime);
+                    });
+              }
+              dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+            }
+          } @finally {
+            decoding->store(false);
           }
         });
       }];
@@ -351,6 +372,7 @@ void VideoCompositionFramesExtractorHostObject::seekTo(CMTime time) {
              toleranceAfter:kCMTimeZero];
   }
   @synchronized(lock) {
+    needsDecode = true;
     for (const auto& entry : itemDecoders) {
       entry.second->seekTo(time);
     }

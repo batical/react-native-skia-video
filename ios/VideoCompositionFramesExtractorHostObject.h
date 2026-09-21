@@ -55,6 +55,7 @@ private:
   bool isPlaying = false;
   bool isLooping = false;
   bool initialized = false;
+  bool needsDecode = true;
   bool completeEmitted = false;
   // Plays the audio of the composition; when present it is also the master
   // clock of the playback.
