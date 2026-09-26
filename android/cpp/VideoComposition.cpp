@@ -86,6 +86,13 @@ VideoComposition::fromJSIObject(jsi::Runtime& runtime,
                             (int)res.getProperty(runtime, "height").asNumber());
       }
     }
+    if (jsItem.hasProperty(runtime, "maxLongSide")) {
+      auto capProp = jsItem.getProperty(runtime, "maxLongSide");
+      if (capProp.isNumber() && capProp.asNumber() > 0) {
+        item->setFieldValue(itemCls->getField<jint>("maxLongSide"),
+                            (int)capProp.asNumber());
+      }
+    }
     bool isVideo = true;
     if (jsItem.hasProperty(runtime, "kind")) {
       auto kindProp = jsItem.getProperty(runtime, "kind");

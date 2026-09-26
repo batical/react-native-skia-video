@@ -221,7 +221,7 @@ export type VideoCompositionVideoItem = VideoCompositionItemBase & {
      *
      * Given in the file's *encoded* orientation, which for a portrait clip is
      * the transpose of what it displays as — prefer `maxLongSide` unless an
-     * exact pixel size is needed. iOS only; Android decodes at the file's size.
+     * exact pixel size is needed.
      */
     resolution?: {
         width: number;
@@ -237,7 +237,8 @@ export type VideoCompositionVideoItem = VideoCompositionItemBase & {
      * the encoded orientation — so unlike `resolution`, this cannot squash a
      * rotated clip.
      *
-     * iOS only, as `resolution` is.
+     * On Android the decoder still reads the whole picture and the cap sizes the
+     * texture it is drawn into, which is what the item holds in memory.
      */
     maxLongSide?: number;
     /**

@@ -164,16 +164,18 @@ public class VideoCompositionDecoder {
         continue;
       }
       eglResourcesHolder.makeCurrent();
-      int itemWidth = item.getWidth();
-      int itemHeight = item.getHeight();
-      boolean shouldDownScale = itemWidth > 0 && itemHeight > 0;
-      int frameWidth = shouldDownScale ? itemWidth : decoder.getVideoWidth();
-      int frameHeight = shouldDownScale ? itemHeight : decoder.getVideoHeight();
-      if (decoder.getRotation() == 90 || decoder.getRotation() == 270) {
-        int temp = frameWidth;
-        frameWidth = frameHeight;
-        frameHeight = temp;
-      } 
+      // The decoder still decodes the whole picture; the cap sizes the texture
+      // it is drawn into, which is what an item holds for the life of the player.
+      int[] size = FrameSize.of(
+        item.getWidth(),
+        item.getHeight(),
+        item.getMaxLongSide(),
+        decoder.getVideoWidth(),
+        decoder.getVideoHeight(),
+        decoder.getRotation()
+      );
+      int frameWidth = size[0];
+      int frameHeight = size[1];
       if (!glFrameExtractor.decodeNextFrame(frameWidth, frameHeight)) {
         continue;
       }

@@ -44,6 +44,7 @@ public class VideoComposition {
     private double duration;
     private int width = -1;
     private int height = -1;
+    private int maxLongSide = -1;
     private boolean isVideo = true;
     private boolean audioEnabled = false;
     private double audioVolume = 1.0;
@@ -91,6 +92,10 @@ public class VideoComposition {
 
     public int getHeight() {
       return height;
+    }
+
+    public int getMaxLongSide() {
+      return maxLongSide;
     }
 
     public boolean isVideo() {
