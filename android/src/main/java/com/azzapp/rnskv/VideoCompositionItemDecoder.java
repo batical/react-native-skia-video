@@ -313,13 +313,16 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
     if (framesToRenders.isEmpty()) {
       return null;
     }
-    framesToRenders.forEach(frame -> {
+    // Only the latest is drawn: after a seek the batch runs from the previous
+    // key frame, and drawing each one into the surface is GPU work nobody sees.
+    int lastIndex = framesToRenders.size() - 1;
+    for (int i = 0; i <= lastIndex; i++) {
       try {
-        codec.releaseOutputBuffer(frame.outputBufferIndex, true);
+        codec.releaseOutputBuffer(framesToRenders.get(i).outputBufferIndex, i == lastIndex);
       } catch (Throwable e) {
-        return;
+        // A codec flushed or released meanwhile: the buffer is gone with it.
       }
-    });
+    }
     freeFrames.addAll(framesToRenders);
     pendingFrames.removeAll(framesToRenders);
 
