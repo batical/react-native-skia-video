@@ -107,7 +107,7 @@ public class CompositionPreviewTest {
   @Test
   public void anEagerMontagePlaysThrough() throws Exception {
     open(false);
-    playThrough(MONTAGE.length);
+    playThrough(MONTAGE.length, true);
   }
 
   @Test
@@ -115,7 +115,7 @@ public class CompositionPreviewTest {
     open(true);
     // At most the item before, kept past its end, the one on screen, and the
     // one after, opened ahead.
-    playThrough(3);
+    playThrough(3, false);
   }
 
   @Test
@@ -182,7 +182,7 @@ public class CompositionPreviewTest {
     handler.post(tick);
   }
 
-  private void playThrough(int maxOpenAllowed) throws Exception {
+  private void playThrough(int maxOpenAllowed, boolean allOpen) throws Exception {
     play();
     int checks = 0;
     int maxOpen = 0;
@@ -201,7 +201,7 @@ public class CompositionPreviewTest {
     }
     assertTrue("only " + checks + " frames checked", checks > 50);
     assertTrue("up to " + maxOpen + " decoders open", maxOpen <= maxOpenAllowed);
-    if (maxOpenAllowed == MONTAGE.length) {
+    if (allOpen) {
       assertEquals(MONTAGE.length, maxOpen);
     }
   }
