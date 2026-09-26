@@ -252,12 +252,16 @@ VideoCompositionItemDecoder::acquireFrameForTime(CMTime currentTime,
     }
     lastRequestedTime = currentTime;
 
+    // Plus a microsecond: a time asked for at exactly a frame's timestamp
+    // (the export asks for i / fps) lands a fraction of a nanosecond before
+    // it once rounded to nanoseconds, and was given the previous frame — an
+    // export at the file's frame rate duplicated and skipped frames.
+    double offset =
+        MAX(CMTimeGetSeconds(currentTime) - item->compositionStartTime, 0);
+    CMTime start = CMTimeMakeWithSeconds(item->startTime, NSEC_PER_SEC);
     CMTime position = CMTimeAdd(
-        CMTimeMakeWithSeconds(item->startTime, NSEC_PER_SEC),
-        CMTimeMakeWithSeconds(
-            MAX((CMTimeGetSeconds(currentTime) - item->compositionStartTime),
-                0),
-            NSEC_PER_SEC));
+        CMTimeAdd(start, CMTimeMakeWithSeconds(offset, NSEC_PER_SEC)),
+        CMTimeMake(1, 1000000));
 
     auto it = decodedFrames.begin();
     while (it != decodedFrames.end()) {
