@@ -1423,6 +1423,22 @@ static int slowMotionFrameAt(double t) {
   [self awaitFrame:kMontage[1] at:2.5];
 }
 
+// Regression: the frames object was filled in place, so an item whose decoder
+// closed kept its last frame in it. A seek back into the item was handed that
+// frame before the new decoder had one; on Android its texture was deleted
+// and drawing it killed the app.
+- (void)testAClosedItemLeavesTheFramesObject {
+  [self open:true];
+  [self awaitFrame:kMontage[0] at:0];
+  XCTAssertTrue([self pump].count("a"));
+  [self seek:5.0];
+  [self awaitFrame:kMontage[2] at:5.0];
+  XCTAssertFalse(extractor->itemDecoders.count("a"));
+  auto frames = [self pump];
+  XCTAssertFalse(frames.count("a"), @"a is closed but still has a frame");
+  XCTAssertTrue(frames.count("c"));
+}
+
 - (void)testAScrubSettlesOnTheRightFrame {
   [self open:true];
   std::mt19937 random(7);
