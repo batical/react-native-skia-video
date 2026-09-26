@@ -4,6 +4,7 @@ import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.os.Handler;
+import android.os.Looper;
 import android.view.Surface;
 
 import androidx.annotation.NonNull;
@@ -52,6 +53,15 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
   private long initialPositionUs = 0;
 
   private Handler callbackHandler;
+
+  /**
+   * Set by a seek until the codec's thread has run every callback queued
+   * before the flush: those name buffers the flush took back, and handling
+   * them after it hands out or drops the buffers of the new position.
+   */
+  private boolean droppingStaleCallbacks = false;
+
+  private long flushGeneration = 0;
 
   private final Stack<Frame> freeFrames = new Stack<>();
 
@@ -190,7 +200,7 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
 
   @Override
   synchronized public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) {
-    if (!prepared || !configured || released) {
+    if (!prepared || !configured || released || droppingStaleCallbacks) {
       return;
     }
 
@@ -236,7 +246,7 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
   @Override
   synchronized public void onOutputBufferAvailable(
     @NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
-    if (released) {
+    if (released || droppingStaleCallbacks) {
       return;
     }
     boolean outputEOS = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
@@ -338,6 +348,19 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
     freeFrames.addAll(pendingFrames);
     pendingFrames.clear();
     codec.flush();
+    // Queued behind the callbacks from before the flush, and ahead of those
+    // start() brings: they run on this handler's thread in order.
+    if (callbackHandler != null) {
+      droppingStaleCallbacks = true;
+      long generation = ++flushGeneration;
+      callbackHandler.post(() -> {
+        synchronized (this) {
+          if (flushGeneration == generation) {
+            droppingStaleCallbacks = false;
+          }
+        }
+      });
+    }
     long itemTime = time - TimeHelpers.secToUs(item.getCompositionStartTime());
     long seekTime = TimeHelpers.secToUs(item.getStartTime()) + Math.max(itemTime, 0);
     extractor.seekTo(seekTime, MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
@@ -367,6 +390,11 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
 
   private synchronized void configure() {
     if (prepared && surface != null && !configured) {
+      if (callbackHandler == null) {
+        // Where MediaCodec would call back without a handler; seekTo posts to it.
+        Looper looper = Looper.myLooper();
+        callbackHandler = new Handler(looper != null ? looper : Looper.getMainLooper());
+      }
       codec.setCallback(this, callbackHandler);
       codec.configure(format, surface, null, 0);
       configured = true;
