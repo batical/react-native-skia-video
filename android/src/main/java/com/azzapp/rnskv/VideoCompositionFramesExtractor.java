@@ -77,7 +77,14 @@ public class VideoCompositionFramesExtractor {
       return;
     }
     EGLContext sharedContext = EGLUtils.getCurrentContextOrThrows();
-    decoder.prepare(sharedContext);
+    try {
+      decoder.prepare(sharedContext);
+    } catch (RuntimeException error) {
+      // A decoder that cannot open, as a lazy one reports it: thrown, it
+      // reached the UI thread's worklet uncaught and killed the app.
+      eventDispatcher.dispatchEvent("error", messageOf(error));
+      return;
+    }
     handler.sendEmptyMessage(PLAYBACK_PREPARE);
   }
 
