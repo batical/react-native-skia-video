@@ -140,7 +140,7 @@ VideoComposition::fromJSIObject(jsi::Runtime& runtime,
       composition->setFieldValue(
           VideoComposition::javaClassStatic()->getField<jboolean>(
               "lazyDecoders"),
-          JNI_TRUE);
+          (jboolean)JNI_TRUE);
     }
   }
   return composition;
