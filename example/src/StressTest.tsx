@@ -528,7 +528,7 @@ export default function StressTest({ autorun }: { autorun?: boolean }) {
           const times =
             step === 'seek'
               ? [
-                  composition.duration * 0.8,
+                  composition.duration * 0.8 + 0.013,
                   0.2,
                   ...composition.items
                     .filter((item) => item.kind !== 'audio')
@@ -537,9 +537,9 @@ export default function StressTest({ autorun }: { autorun?: boolean }) {
                       (item) => item.compositionStartTime + item.duration * 0.5
                     ),
                   composition.duration - 0.1,
-                  composition.duration * 0.33,
+                  composition.duration * 0.33 + 0.013,
                 ]
-              : [composition.duration * 0.6];
+              : [composition.duration * 0.6 + 0.013];
           const failures: string[] = [];
           let slowest = 0;
           for (const time of times) {
