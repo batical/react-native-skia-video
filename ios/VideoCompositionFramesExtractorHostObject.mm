@@ -21,6 +21,13 @@ VideoCompositionFramesExtractorHostObject::
 VideoCompositionFramesExtractorHostObject::
     ~VideoCompositionFramesExtractorHostObject() {
   this->release();
+  // The queued blocks hold this, a reader being opened among them: this
+  // returns once they have all run.
+  if (decoderQueue) {
+    dispatch_sync(decoderQueue, ^{
+      return;
+    });
+  }
 }
 
 std::vector<jsi::PropNameID>

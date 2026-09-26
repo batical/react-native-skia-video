@@ -51,7 +51,7 @@ public class VideoCompositionDecoder {
 
   private boolean started = false;
 
-  private boolean released = false;
+  private volatile boolean released = false;
 
   private long seekGeneration = 0;
 
@@ -112,7 +112,7 @@ public class VideoCompositionDecoder {
       callbacks = new Handler(callbackThread.getLooper());
     }
     for (VideoComposition.Item item : composition.getItems()) {
-      if (!item.isVideo() || !opens(item, positionUs, false)) {
+      if (!item.isVideo() || !opens(item, positionUs)) {
         continue;
       }
       Slot slot = new Slot(item, positionUs, seekGeneration);
@@ -148,9 +148,8 @@ public class VideoCompositionDecoder {
    * surface on its next {@link #updateVideosFrames}, then the opener the codec.
    *
    * @param positionUs the composition time
-   * @param looping    whether the composition starts over at its end
    */
-  public synchronized void updateWindow(long positionUs, boolean looping) {
+  public synchronized void updateWindow(long positionUs) {
     if (released || !window.isLazy()) {
       return;
     }
@@ -159,13 +158,13 @@ public class VideoCompositionDecoder {
         continue;
       }
       Slot slot = slots.get(item);
-      if (slot == null && opens(item, positionUs, looping)) {
+      if (slot == null && opens(item, positionUs)) {
         slot = new Slot(item, positionUs, seekGeneration);
         slots.put(item, slot);
         if (!realTime) {
           openNow(slot);
         }
-      } else if (slot != null && !keeps(item, positionUs, looping)) {
+      } else if (slot != null && !keeps(item, positionUs)) {
         slots.remove(item);
         retire(slot);
       }
@@ -391,26 +390,14 @@ public class VideoCompositionDecoder {
     }
   }
 
-  private boolean opens(VideoComposition.Item item, long positionUs, boolean looping) {
+  private boolean opens(VideoComposition.Item item, long positionUs) {
     long startUs = TimeHelpers.secToUs(item.getCompositionStartTime());
-    return window.opens(
-      startUs,
-      startUs + TimeHelpers.secToUs(item.getDuration()),
-      positionUs,
-      TimeHelpers.secToUs(composition.getDuration()),
-      looping
-    );
+    return window.opens(startUs, startUs + TimeHelpers.secToUs(item.getDuration()), positionUs);
   }
 
-  private boolean keeps(VideoComposition.Item item, long positionUs, boolean looping) {
+  private boolean keeps(VideoComposition.Item item, long positionUs) {
     long startUs = TimeHelpers.secToUs(item.getCompositionStartTime());
-    return window.keeps(
-      startUs,
-      startUs + TimeHelpers.secToUs(item.getDuration()),
-      positionUs,
-      TimeHelpers.secToUs(composition.getDuration()),
-      looping
-    );
+    return window.keeps(startUs, startUs + TimeHelpers.secToUs(item.getDuration()), positionUs);
   }
 
   /**
@@ -426,6 +413,7 @@ public class VideoCompositionDecoder {
         decoder.start();
       }
     } catch (Exception e) {
+      releaseCodec(slot);
       reportError(e);
     }
   }
@@ -439,7 +427,9 @@ public class VideoCompositionDecoder {
       return;
     }
     synchronized (slot) {
-      if (slot.retired || slot.failed || slot.extractor != null) {
+      // released is read under the slot lock, which release() takes after
+      // setting it: a surface made here is one release() will see.
+      if (released || slot.retired || slot.failed || slot.extractor != null) {
         return;
       }
       try {
@@ -450,7 +440,9 @@ public class VideoCompositionDecoder {
         return;
       }
     }
-    opener.post(() -> openLater(slot));
+    if (!opener.post(() -> openLater(slot))) {
+      releaseExtractor(slot);
+    }
   }
 
   private void openLater(Slot slot) {
@@ -479,9 +471,15 @@ public class VideoCompositionDecoder {
         return;
       }
       if (started) {
-        decoder.start();
-        if (seekGeneration != slot.seekGeneration) {
-          decoder.seekTo(seekPositionUs);
+        try {
+          decoder.start();
+          if (seekGeneration != slot.seekGeneration) {
+            decoder.seekTo(seekPositionUs);
+          }
+        } catch (RuntimeException e) {
+          // Uncaught, this would end the app from the opener thread.
+          releaseCodec(slot);
+          reportError(e);
         }
       }
     }
@@ -500,7 +498,11 @@ public class VideoCompositionDecoder {
   }
 
   private void close(Slot slot) {
-    releaseCodec(slot);
+    try {
+      releaseCodec(slot);
+    } catch (RuntimeException e) {
+      Log.w(TAG, "Could not release a decoder", e);
+    }
     slot.closed = true;
   }
 

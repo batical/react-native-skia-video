@@ -70,7 +70,7 @@ public class VideoCompositionFramesExtractorSync {
     decodingTimeUs = TimeHelpers.secToUs(time);
     future = new CompletableFuture<>();
     handler.post(() -> {
-      decoder.updateWindow(decodingTimeUs, false);
+      decoder.updateWindow(decodingTimeUs);
       forgetClosedItems();
       decoding = true;
       renderedTimes.clear();

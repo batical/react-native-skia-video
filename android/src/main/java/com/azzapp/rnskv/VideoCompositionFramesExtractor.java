@@ -220,7 +220,7 @@ public class VideoCompositionFramesExtractor {
     } else {
       completeDispatched = false;
     }
-    decoder.updateWindow(currentPosition, looping);
+    decoder.updateWindow(currentPosition);
     decoder.render(currentPosition);
     if (isEOS && looping) {
       playInternal();
@@ -245,7 +245,7 @@ public class VideoCompositionFramesExtractor {
     }
     decoder.seekTo(position);
     // After the seek, so a decoder opened for this position is not sought again.
-    decoder.updateWindow(position, looping);
+    decoder.updateWindow(position);
     if (audioPlayer != null) {
       audioPlayer.seekTo(position);
     }

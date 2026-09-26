@@ -94,8 +94,10 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
     }
     codec = MediaCodec.createDecoderByType(mime);
     extractor.selectTrack(trackIndex);
-    long offsetUs = Math.max(
-      initialPositionUs - TimeHelpers.secToUs(item.getCompositionStartTime()), 0);
+    // Capped at the item's end, as on iOS.
+    long offsetUs = Math.min(
+      Math.max(initialPositionUs - TimeHelpers.secToUs(item.getCompositionStartTime()), 0),
+      TimeHelpers.secToUs(item.getDuration()));
     if (item.getStartTime() != 0 || offsetUs != 0) {
       extractor.seekTo(
         TimeHelpers.secToUs(item.getStartTime()) + offsetUs,

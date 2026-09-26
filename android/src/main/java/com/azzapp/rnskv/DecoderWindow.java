@@ -4,6 +4,9 @@ package com.azzapp.rnskv;
  * When an item's decoder is open, for a composition with lazy decoders: from a
  * little before the item starts to a little after it ends. Without lazy
  * decoders every decoder is open for the life of the player.
+ *
+ * Unlike iOS, no read-ahead over a loop's wrap: the wrap seeks every decoder
+ * back to 0, so one opened early would only race through its item meanwhile.
  */
 final class DecoderWindow {
 
@@ -36,29 +39,17 @@ final class DecoderWindow {
    * @param startUs    the item's start in the composition
    * @param endUs      the item's end in the composition
    * @param positionUs the composition time
-   * @param durationUs the composition's duration
-   * @param looping    whether the composition starts over at its end
    */
-  boolean opens(long startUs, long endUs, long positionUs, long durationUs, boolean looping) {
-    return !lazy || within(startUs - leadUs, endUs, positionUs, durationUs, looping);
+  boolean opens(long startUs, long endUs, long positionUs) {
+    return !lazy || (positionUs >= startUs - leadUs && positionUs < endUs);
   }
 
   /**
    * Wider than {@link #opens}, so an item is never closed and reopened on
    * either side of the same edge.
    */
-  boolean keeps(long startUs, long endUs, long positionUs, long durationUs, boolean looping) {
-    return !lazy || within(
-      startUs - leadUs - MARGIN_US, endUs + MARGIN_US, positionUs, durationUs, looping);
-  }
-
-  private static boolean within(
-    long fromUs, long toUs, long positionUs, long durationUs, boolean looping) {
-    if (positionUs >= fromUs && positionUs < toUs) {
-      return true;
-    }
-    // Near the end of a loop, the items at the start come next.
-    long wrappedUs = positionUs - durationUs;
-    return looping && wrappedUs >= fromUs && wrappedUs < toUs;
+  boolean keeps(long startUs, long endUs, long positionUs) {
+    return !lazy
+      || (positionUs >= startUs - leadUs - MARGIN_US && positionUs < endUs + MARGIN_US);
   }
 }
