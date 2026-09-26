@@ -86,6 +86,13 @@ VideoComposition::fromJSIObject(jsi::Runtime& runtime,
                             (int)res.getProperty(runtime, "height").asNumber());
       }
     }
+    if (jsItem.hasProperty(runtime, "maxLongSide")) {
+      auto capProp = jsItem.getProperty(runtime, "maxLongSide");
+      if (capProp.isNumber() && capProp.asNumber() > 0) {
+        item->setFieldValue(itemCls->getField<jint>("maxLongSide"),
+                            (int)capProp.asNumber());
+      }
+    }
     bool isVideo = true;
     if (jsItem.hasProperty(runtime, "kind")) {
       auto kindProp = jsItem.getProperty(runtime, "kind");
@@ -126,6 +133,16 @@ VideoComposition::fromJSIObject(jsi::Runtime& runtime,
 
     items->add(item);
   }
-  return VideoComposition::create(duration, items);
+  auto composition = VideoComposition::create(duration, items);
+  if (jsComposition.hasProperty(runtime, "lazyDecoders")) {
+    auto lazyProp = jsComposition.getProperty(runtime, "lazyDecoders");
+    if (lazyProp.isBool() && lazyProp.getBool()) {
+      composition->setFieldValue(
+          VideoComposition::javaClassStatic()->getField<jboolean>(
+              "lazyDecoders"),
+          (jboolean)JNI_TRUE);
+    }
+  }
+  return composition;
 }
 } // namespace RNSkiaVideo

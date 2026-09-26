@@ -183,6 +183,16 @@ export type VideoComposition = {
      * The duration in seconds of the composition.
      */
     duration: number;
+    /**
+     * Open each video item's decoder shortly before the item starts and close it
+     * shortly after it ends, instead of all of them at prepare. For compositions
+     * that play their items one after another: decoders and their frames are
+     * held for a few items at a time rather than for all of them.
+     *
+     * An item reached by a seek, rather than by playing up to it, shows no frame
+     * until its decoder has opened. The export always waits for it.
+     */
+    lazyDecoders?: boolean;
 };
 type VideoCompositionItemBase = {
     /**
@@ -221,7 +231,7 @@ export type VideoCompositionVideoItem = VideoCompositionItemBase & {
      *
      * Given in the file's *encoded* orientation, which for a portrait clip is
      * the transpose of what it displays as — prefer `maxLongSide` unless an
-     * exact pixel size is needed. iOS only; Android decodes at the file's size.
+     * exact pixel size is needed.
      */
     resolution?: {
         width: number;
@@ -237,7 +247,8 @@ export type VideoCompositionVideoItem = VideoCompositionItemBase & {
      * the encoded orientation — so unlike `resolution`, this cannot squash a
      * rotated clip.
      *
-     * iOS only, as `resolution` is.
+     * On Android the decoder still reads the whole picture and the cap sizes the
+     * texture it is drawn into, which is what the item holds in memory.
      */
     maxLongSide?: number;
     /**
