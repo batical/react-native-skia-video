@@ -5,7 +5,6 @@
 #import "RNSVJSIUtils.h"
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
-#import <future>
 
 namespace RNSkiaVideo {
 
@@ -211,7 +210,7 @@ void VideoCompositionFramesExtractorHostObject::prepare() {
   displayLink = [[RNSVDisplayLinkWrapper alloc]
       initWithUpdateBlock:^(CADisplayLink* displayLink) {
         dispatch_async(decoderQueue, ^{
-          std::vector<std::future<void>> futures;
+          std::vector<std::shared_ptr<VideoCompositionItemDecoder>> advancing;
           std::vector<std::shared_ptr<VideoCompositionItem>> opening;
           std::vector<std::shared_ptr<VideoCompositionItemDecoder>> closing;
           CMTime currentTime = kCMTimeZero;
@@ -262,19 +261,26 @@ void VideoCompositionFramesExtractorHostObject::prepare() {
             if (released.test()) {
               return;
             }
+            // Paused where every decoder has already been advanced to: there
+            // is nothing to decode until the position moves or a seek lands.
+            if (!isPlaying && opening.empty() &&
+                generation == lastAdvancedGeneration &&
+                CMTimeCompare(currentTime, lastAdvancedTime) == 0) {
+              return;
+            }
+            lastAdvancedTime = currentTime;
+            lastAdvancedGeneration = generation;
             for (const auto& entry : itemDecoders) {
-              auto decoder = entry.second;
-              if (decoder) {
-                futures.push_back(
-                    std::async(std::launch::async, [decoder, currentTime]() {
-                      decoder->advanceDecoder(currentTime);
-                    }));
+              if (entry.second) {
+                advancing.push_back(entry.second);
               }
             }
           }
-          for (auto& future : futures) {
-            future.get();
-          }
+          // In parallel on GCD's pool, instead of a new thread per decoder
+          // per vsync.
+          dispatch_apply(advancing.size(), DISPATCH_APPLY_AUTO, ^(size_t i) {
+            advancing[i]->advanceDecoder(currentTime);
+          });
         });
       }];
   [displayLink start];

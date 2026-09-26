@@ -52,6 +52,10 @@ private:
   NSMutableDictionary<NSString*, AVURLAsset*>* assetCache;
   // Tells whether a seek happened while a decoder was being opened.
   uint64_t seekGeneration = 0;
+  // What the decoders were last advanced to, so a paused player stops
+  // asking them again at every vsync.
+  CMTime lastAdvancedTime = kCMTimeInvalid;
+  uint64_t lastAdvancedGeneration = 0;
   std::map<std::string, std::shared_ptr<VideoFrame>> currentFrames;
   // Incremented every time decodeCompositionFrames acquires a new frame for
   // at least one item. Exposed to JS as `framesVersion`, so the player can
