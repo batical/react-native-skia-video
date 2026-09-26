@@ -1,8 +1,11 @@
 package com.azzapp.rnskv;
 
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo.CodecProfileLevel;
+import android.media.MediaCodecList;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Surface;
@@ -102,6 +105,7 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
     if (mime == null) {
       throw new IOException("Could not determine file mime type");
     }
+    mime = playableMime(format, mime);
     codec = MediaCodec.createDecoderByType(mime);
     extractor.selectTrack(trackIndex);
     // Capped at the item's end, as on iOS.
@@ -399,6 +403,34 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
       codec.configure(format, surface, null, 0);
       configured = true;
     }
+  }
+
+  /**
+   * The mime type to decode the track as. A Dolby Vision track on a device
+   * without a Dolby Vision decoder is decoded as its base layer: HDR clips
+   * from an iPhone are profile 8.4, Dolby Vision metadata over an HLG HEVC
+   * stream any HEVC decoder plays; profile 9 is over AVC. Sets the format to
+   * match.
+   */
+  private static String playableMime(MediaFormat format, String mime) {
+    if (!MediaFormat.MIMETYPE_VIDEO_DOLBY_VISION.equals(mime)
+      || new MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) != null) {
+      return mime;
+    }
+    int profile = format.containsKey(MediaFormat.KEY_PROFILE)
+      ? format.getInteger(MediaFormat.KEY_PROFILE) : -1;
+    String base = profile == CodecProfileLevel.DolbyVisionProfileDvavSe
+      || profile == CodecProfileLevel.DolbyVisionProfileDvavPer
+      || profile == CodecProfileLevel.DolbyVisionProfileDvavPen
+      ? MediaFormat.MIMETYPE_VIDEO_AVC
+      : MediaFormat.MIMETYPE_VIDEO_HEVC;
+    format.setString(MediaFormat.KEY_MIME, base);
+    // The Dolby Vision profile and level mean nothing to the base decoder.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      format.removeKey(MediaFormat.KEY_PROFILE);
+      format.removeKey(MediaFormat.KEY_LEVEL);
+    }
+    return base;
   }
 
   private static int selectTrack(MediaExtractor extractor) {
