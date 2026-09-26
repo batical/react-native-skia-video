@@ -34,7 +34,7 @@ public class VideoCompositionFramesExtractorSync {
 
   public VideoCompositionFramesExtractorSync(VideoComposition composition) {
     this.composition = composition;
-    this.decoder = new VideoCompositionDecoder(composition);
+    this.decoder = new VideoCompositionDecoder(composition, false);
   }
 
   public void start() throws Exception {
@@ -70,6 +70,8 @@ public class VideoCompositionFramesExtractorSync {
     decodingTimeUs = TimeHelpers.secToUs(time);
     future = new CompletableFuture<>();
     handler.post(() -> {
+      decoder.updateWindow(decodingTimeUs, false);
+      forgetClosedItems();
       decoding = true;
       renderedTimes.clear();
       checkIfFrameDecoded();
@@ -100,6 +102,18 @@ public class VideoCompositionFramesExtractorSync {
     }
   }
 
+  /**
+   * With lazy decoders, an item reopened later must wait for its own frames.
+   */
+  private void forgetClosedItems() {
+    for (VideoComposition.Item item : composition.getItems()) {
+      if (item.isVideo() && !decoder.isOpen(item)) {
+        itemsTimes.remove(item);
+        itemsEnded.remove(item);
+      }
+    }
+  }
+
   private void onFrameAvailable(VideoComposition.Item item, long presentationTimeUs) {
     itemsTimes.put(item, presentationTimeUs);
     if (decoding) {
@@ -117,7 +131,7 @@ public class VideoCompositionFramesExtractorSync {
   private void checkIfFrameDecoded() {
     boolean allItemsReady = true;
     for (VideoComposition.Item item : composition.getItems()) {
-      if (!item.isVideo()) {
+      if (!item.isVideo() || !decoder.isOpen(item)) {
         continue;
       }
       if (!itemsTimes.containsKey(item)) {
@@ -173,7 +187,7 @@ public class VideoCompositionFramesExtractorSync {
       GLES20.glFinish();
     }
     for (VideoComposition.Item item : composition.getItems()) {
-      if (!item.isVideo()) {
+      if (!item.isVideo() || !decoder.isOpen(item)) {
         continue;
       }
       VideoFrame videoFrame = videoFrames.getOrDefault(item.getId(), null);

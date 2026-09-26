@@ -133,6 +133,16 @@ VideoComposition::fromJSIObject(jsi::Runtime& runtime,
 
     items->add(item);
   }
-  return VideoComposition::create(duration, items);
+  auto composition = VideoComposition::create(duration, items);
+  if (jsComposition.hasProperty(runtime, "lazyDecoders")) {
+    auto lazyProp = jsComposition.getProperty(runtime, "lazyDecoders");
+    if (lazyProp.isBool() && lazyProp.getBool()) {
+      composition->setFieldValue(
+          VideoComposition::javaClassStatic()->getField<jboolean>(
+              "lazyDecoders"),
+          JNI_TRUE);
+    }
+  }
+  return composition;
 }
 } // namespace RNSkiaVideo

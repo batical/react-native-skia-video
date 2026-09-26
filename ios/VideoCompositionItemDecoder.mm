@@ -10,7 +10,7 @@ namespace RNSkiaVideo {
 
 VideoCompositionItemDecoder::VideoCompositionItemDecoder(
     std::shared_ptr<VideoCompositionItem> item, bool realTime,
-    AVURLAsset* sharedAsset)
+    AVURLAsset* sharedAsset, CMTime initialTime)
     // The sync (export) consumer flushes the GPU before asking for the next
     // frame, so retiring a frame the moment it is replaced is safe and keeps
     // one decoded buffer alive per item instead of four — at 4K that is
@@ -41,7 +41,7 @@ VideoCompositionItemDecoder::VideoCompositionItemDecoder(
   height = videoTrack.naturalSize.height;
   rotation = AVAssetTrackUtils::GetTrackRotationInDegree(videoTrack);
   currentFrame = nullptr;
-  this->setupReader(kCMTimeZero);
+  this->setupReader(initialTime);
 }
 
 void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
@@ -52,8 +52,11 @@ void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
   }
 
   auto startTime = CMTimeMakeWithSeconds(item->startTime, NSEC_PER_SEC);
+  // Capped at the item's end: a seek past it would otherwise ask the reader
+  // for a negative duration.
   auto position = CMTimeMakeWithSeconds(
-      MAX((CMTimeGetSeconds(initialTime) - item->compositionStartTime), 0),
+      MIN(MAX((CMTimeGetSeconds(initialTime) - item->compositionStartTime), 0),
+          item->duration),
       NSEC_PER_SEC);
   assetReader.timeRange = CMTimeRangeMake(
       CMTimeAdd(startTime, position),

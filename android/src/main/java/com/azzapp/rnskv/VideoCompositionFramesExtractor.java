@@ -62,7 +62,7 @@ public class VideoCompositionFramesExtractor {
   public VideoCompositionFramesExtractor(VideoComposition composition, NativeEventDispatcher eventDispatcher) {
     this.eventDispatcher = eventDispatcher;
     this.composition = composition;
-    decoder = new VideoCompositionDecoder(composition);
+    decoder = new VideoCompositionDecoder(composition, true);
     playbackThread = new PlaybackThread();
     playbackThread.start();
     handler = new Handler(playbackThread.getLooper(), playbackThread);
@@ -220,6 +220,7 @@ public class VideoCompositionFramesExtractor {
     } else {
       completeDispatched = false;
     }
+    decoder.updateWindow(currentPosition, looping);
     decoder.render(currentPosition);
     if (isEOS && looping) {
       playInternal();
@@ -243,6 +244,8 @@ public class VideoCompositionFramesExtractor {
       return;
     }
     decoder.seekTo(position);
+    // After the seek, so a decoder opened for this position is not sought again.
+    decoder.updateWindow(position, looping);
     if (audioPlayer != null) {
       audioPlayer.seekTo(position);
     }

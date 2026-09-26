@@ -11,6 +11,8 @@ public class VideoComposition {
 
   private final double duration;
 
+  private boolean lazyDecoders = false;
+
   public VideoComposition(
     double duration,
     List<Item> items
@@ -25,6 +27,14 @@ public class VideoComposition {
 
   public double getDuration() {
     return duration;
+  }
+
+  /**
+   * @return whether decoders are opened around their item's time rather than
+   * all at once, see {@link DecoderWindow}
+   */
+  public boolean isLazyDecoders() {
+    return lazyDecoders;
   }
 
   public boolean hasAudio() {

@@ -3,6 +3,7 @@ package com.azzapp.rnskv;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.os.Handler;
 import android.view.Surface;
 
 import androidx.annotation.NonNull;
@@ -44,9 +45,13 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
 
   private boolean started = false;
 
-  private boolean released = false;
+  private volatile boolean released = false;
 
   private Surface surface;
+
+  private long initialPositionUs = 0;
+
+  private Handler callbackHandler;
 
   private final Stack<Frame> freeFrames = new Stack<>();
 
@@ -89,9 +94,12 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
     }
     codec = MediaCodec.createDecoderByType(mime);
     extractor.selectTrack(trackIndex);
-    if (item.getStartTime() != 0) {
+    long offsetUs = Math.max(
+      initialPositionUs - TimeHelpers.secToUs(item.getCompositionStartTime()), 0);
+    if (item.getStartTime() != 0 || offsetUs != 0) {
       extractor.seekTo(
-        TimeHelpers.secToUs(item.getStartTime()), MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
+        TimeHelpers.secToUs(item.getStartTime()) + offsetUs,
+        MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
     }
     videoWidth = format.getInteger(MediaFormat.KEY_WIDTH);
     videoHeight = format.getInteger(MediaFormat.KEY_HEIGHT);
@@ -121,6 +129,22 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
     configure();
   }
 
+
+  /**
+   * Where decoding starts, as a composition time, for a decoder opened after
+   * its item has begun. Must be called before {@link #prepare}.
+   */
+  public void setInitialPosition(long compositionTimeUs) {
+    initialPositionUs = compositionTimeUs;
+  }
+
+  /**
+   * The thread the codec calls back on, instead of the one that configures it.
+   * Must be called before {@link #setSurface}.
+   */
+  public void setCallbackHandler(Handler callbackHandler) {
+    this.callbackHandler = callbackHandler;
+  }
 
   public void setOnErrorListener(OnErrorListener onErrorListener) {
     this.onErrorListener = onErrorListener;
@@ -257,6 +281,9 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
 
   @Override
   public void onError(@NonNull MediaCodec codec, @NonNull MediaCodec.CodecException e) {
+    if (released) {
+      return;
+    }
     if (onErrorListener != null) {
       onErrorListener.onError(e);
     }
@@ -335,7 +362,7 @@ public class VideoCompositionItemDecoder extends MediaCodec.Callback {
 
   private synchronized void configure() {
     if (prepared && surface != null && !configured) {
-      codec.setCallback(this);
+      codec.setCallback(this, callbackHandler);
       codec.configure(format, surface, null, 0);
       configured = true;
     }
