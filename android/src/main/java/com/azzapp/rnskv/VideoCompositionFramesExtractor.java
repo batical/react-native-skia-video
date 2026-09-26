@@ -63,6 +63,10 @@ public class VideoCompositionFramesExtractor {
     this.eventDispatcher = eventDispatcher;
     this.composition = composition;
     decoder = new VideoCompositionDecoder(composition, true);
+    // Only a decoder that cannot open, as on iOS: a codec's passing errors
+    // stay quiet, since the player gives up on the first error it reports.
+    decoder.setOnOpenErrorListener(
+      error -> eventDispatcher.dispatchEvent("error", messageOf(error)));
     playbackThread = new PlaybackThread();
     playbackThread.start();
     handler = new Handler(playbackThread.getLooper(), playbackThread);
@@ -314,13 +318,18 @@ public class VideoCompositionFramesExtractor {
           }
         }
       } catch (Exception error) {
-        eventDispatcher.dispatchEvent("error", error.getMessage());
+        eventDispatcher.dispatchEvent("error", messageOf(error));
       }
 
       // Release after an exception
       releaseInternal();
       return true;
     }
+  }
+
+  // Never null: the native side reads the message as a string.
+  private static String messageOf(Exception error) {
+    return error.getMessage() != null ? error.getMessage() : error.toString();
   }
 
   private static long microTime() {

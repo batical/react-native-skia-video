@@ -71,6 +71,8 @@ public class VideoCompositionDecoder {
 
   private OnErrorListener onErrorListener;
 
+  private OnErrorListener onOpenErrorListener;
+
   private OnItemEndReachedListener onItemEndReachedListener;
 
   /**
@@ -196,6 +198,15 @@ public class VideoCompositionDecoder {
    */
   public void setOnErrorListener(OnErrorListener onErrorListener) {
     this.onErrorListener = onErrorListener;
+  }
+
+  /**
+   * Sets the listener for a decoder that could not be opened lazily; falls
+   * back to the error listener. Unlike a codec's passing errors, the item
+   * will show no frame.
+   */
+  public void setOnOpenErrorListener(OnErrorListener onOpenErrorListener) {
+    this.onOpenErrorListener = onOpenErrorListener;
   }
 
   /**
@@ -414,7 +425,7 @@ public class VideoCompositionDecoder {
       }
     } catch (Exception e) {
       releaseCodec(slot);
-      reportError(e);
+      reportOpenError(e);
     }
   }
 
@@ -436,7 +447,7 @@ public class VideoCompositionDecoder {
         slot.extractor = newExtractor(slot.item);
       } catch (Exception e) {
         slot.failed = true;
-        reportError(e);
+        reportOpenError(e);
         return;
       }
     }
@@ -455,7 +466,7 @@ public class VideoCompositionDecoder {
     try {
       decoder = openCodec(slot);
     } catch (Exception e) {
-      reportError(e);
+      reportOpenError(e);
       return;
     }
     synchronized (this) {
@@ -479,7 +490,7 @@ public class VideoCompositionDecoder {
         } catch (RuntimeException e) {
           // Uncaught, this would end the app from the opener thread.
           releaseCodec(slot);
-          reportError(e);
+          reportOpenError(e);
         }
       }
     }
@@ -562,6 +573,15 @@ public class VideoCompositionDecoder {
       throw e;
     }
     return decoder;
+  }
+
+  private void reportOpenError(Exception e) {
+    OnErrorListener listener = onOpenErrorListener;
+    if (listener != null) {
+      listener.onError(e);
+    } else {
+      reportError(e);
+    }
   }
 
   private void reportError(Exception e) {
