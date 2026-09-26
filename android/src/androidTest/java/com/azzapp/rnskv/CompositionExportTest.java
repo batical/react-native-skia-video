@@ -73,7 +73,9 @@ public class CompositionExportTest {
       extractor.release();
     }
     executor.shutdownNow();
-    gl.release();
+    if (gl != null) {
+      gl.release();
+    }
   }
 
   @Test
