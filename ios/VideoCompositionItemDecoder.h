@@ -31,7 +31,6 @@ private:
   int rotation;
   AVURLAsset* asset;
   AVAssetTrack* videoTrack;
-  NSArray<AVAssetTrackSegment*>* segments;
   AVAssetReader* assetReader;
   std::list<std::pair<double, CMSampleBufferRef>> decodedFrames;
   std::list<std::pair<double, CMSampleBufferRef>> nextLoopFrames;
@@ -47,7 +46,6 @@ private:
   id<MTLTexture> persistentTexture;
 
   void setupReader(CMTime initialTime);
-  double mapSourceTimeToTarget(CMTime sourceTime);
   std::shared_ptr<VideoFrame> makeFrame(CVPixelBufferRef buffer);
 };
 
