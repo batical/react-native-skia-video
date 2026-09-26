@@ -161,12 +161,14 @@ public class VideoCompositionDecoder {
       }
       Slot slot = slots.get(item);
       if (slot == null && opens(item, positionUs)) {
+        Log.d(TAG, "open " + item.getId() + " at " + positionUs + "us");
         slot = new Slot(item, positionUs, seekGeneration);
         slots.put(item, slot);
         if (!realTime) {
           openNow(slot);
         }
       } else if (slot != null && !keeps(item, positionUs)) {
+        Log.d(TAG, "close " + item.getId() + " at " + positionUs + "us");
         slots.remove(item);
         retire(slot);
       }

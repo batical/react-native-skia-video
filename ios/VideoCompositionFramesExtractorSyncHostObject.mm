@@ -139,11 +139,13 @@ void VideoCompositionFramesExtractorSyncHostObject::updateWindow(CMTime time) {
     auto it = itemDecoders.find(item->id);
     if (it == itemDecoders.end()) {
       if (window.opens(start, end, position, composition->duration, false)) {
+        NSLog(@"[rnskv] export open %s at %.3fs", item->id.c_str(), position);
         itemDecoders[item->id] = std::make_shared<VideoCompositionItemDecoder>(
             item, false, nil, time);
       }
     } else if (!window.keeps(start, end, position, composition->duration,
                              false)) {
+      NSLog(@"[rnskv] export close %s at %.3fs", item->id.c_str(), position);
       it->second->release();
       itemDecoders.erase(it);
       currentFrames.erase(item->id);

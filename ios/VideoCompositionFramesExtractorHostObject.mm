@@ -418,10 +418,12 @@ void VideoCompositionFramesExtractorHostObject::updateWindow(
       if (!failedItems.count(item->id) &&
           window.opens(start, end, position, composition->duration,
                        isLooping)) {
+        NSLog(@"[rnskv] open %s at %.3fs", item->id.c_str(), position);
         opening.push_back(item);
       }
     } else if (!window.keeps(start, end, position, composition->duration,
                              isLooping)) {
+      NSLog(@"[rnskv] close %s at %.3fs", item->id.c_str(), position);
       closing.push_back(it->second);
       itemDecoders.erase(it);
       if (currentFrames.erase(item->id) > 0) {
