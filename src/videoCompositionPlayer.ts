@@ -123,7 +123,16 @@ export const useVideoCompositionPlayer = <T = undefined>({
 
   useEffect(() => {
     runOnUI(() => {
-      framesExtractor?.prepare();
+      if (!framesExtractor) {
+        return;
+      }
+      // On Android prepare() shares the GL context current on this thread,
+      // Skia's, which Skia only makes on its first drawing: a player that is
+      // the app's first Skia content found none and threw, killing the app.
+      // A throwaway surface makes it, as the export's surface does before the
+      // encoder shares it.
+      Skia.Surface.MakeOffscreen(1, 1)?.dispose();
+      framesExtractor.prepare();
     })();
   }, [framesExtractor]);
 
