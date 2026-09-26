@@ -188,6 +188,27 @@ public class PlayerTest {
     seekAndCheck(2.5);
   }
 
+  // Regression: MediaCodec callbacks queued before a seek's flush ran after
+  // it and handed out buffers of the new position as stale ones: the frame
+  // froze on one from before the seek, in 26 rounds out of 30.
+  @Test
+  public void aPausedSeekAfterAScrubShowsItsFrameEveryTime() {
+    for (int round = 0; round < 12; round++) {
+      open();
+      player.extractor.play();
+      Random random = new Random(round);
+      for (int i = 0; i < 60; i++) {
+        player.seek(random.nextDouble() * 6);
+        player.frames();
+        SystemClock.sleep(16);
+      }
+      player.extractor.pause();
+      seekAndCheck(2.5);
+      close();
+      player = null;
+    }
+  }
+
   @Test
   public void pauseStopsTheClockAndPlayResumes() {
     open();
