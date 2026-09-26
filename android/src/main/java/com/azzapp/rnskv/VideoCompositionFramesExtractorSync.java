@@ -134,11 +134,14 @@ public class VideoCompositionFramesExtractorSync {
       if (!item.isVideo() || !decoder.isOpen(item)) {
         continue;
       }
-      if (!itemsTimes.containsKey(item)) {
-        allItemsReady = false;
+      // Before the frame check: an item that ends without a single frame in
+      // its range (a start past the file's end) would otherwise hold the
+      // export forever.
+      if (itemsEnded.contains(item)) {
         continue;
       }
-      if (itemsEnded.contains(item)) {
+      if (!itemsTimes.containsKey(item)) {
+        allItemsReady = false;
         continue;
       }
       Long itemTime = itemsTimes.get(item);
@@ -192,6 +195,10 @@ public class VideoCompositionFramesExtractorSync {
       }
       VideoFrame videoFrame = videoFrames.getOrDefault(item.getId(), null);
       if (videoFrame == null) {
+        if (itemsEnded.contains(item) && !itemsTimes.containsKey(item)) {
+          // Ended without a frame: there will never be one to wait for.
+          continue;
+        }
         return;
       }
       Long itemFrameTime = renderedTimes.getOrDefault(item.getId(), null);
