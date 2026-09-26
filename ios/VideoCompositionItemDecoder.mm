@@ -58,10 +58,22 @@ void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
       MIN(MAX((CMTimeGetSeconds(initialTime) - item->compositionStartTime), 0),
           item->duration),
       NSEC_PER_SEC);
-  assetReader.timeRange = CMTimeRangeMake(
-      CMTimeAdd(startTime, position),
-      CMTimeSubtract(CMTimeMakeWithSeconds(item->duration, NSEC_PER_SEC),
-                     position));
+  // The start in the track's own timescale, rounded down. Given in
+  // nanoseconds, a start on a frame's exact time (1.2 s, frame 36 at 30 fps)
+  // can land a hair before that frame once AVAssetReader applies the track's
+  // edit offset, which is not a whole number of nanoseconds (1/30 s for a
+  // file with reordered frames): the reader then hands over the previous
+  // frame stamped with the requested time and never the one asked for.
+  CMTime endTime = CMTimeAdd(
+      startTime, CMTimeMakeWithSeconds(item->duration, NSEC_PER_SEC));
+  CMTime readStart = CMTimeAdd(startTime, position);
+  if (videoTrack.naturalTimeScale > 0) {
+    readStart = CMTimeMinimum(
+        CMTimeConvertScale(readStart, videoTrack.naturalTimeScale,
+                           kCMTimeRoundingMethod_RoundTowardNegativeInfinity),
+        endTime);
+  }
+  assetReader.timeRange = CMTimeRangeFromTimeToTime(readStart, endTime);
 
   // AVAssetReaderTrackOutput takes pixel buffer attributes and video settings
   // in the same dictionary, so the color properties travel with them: an HDR
