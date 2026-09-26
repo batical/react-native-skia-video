@@ -67,6 +67,7 @@ android {
     minSdkVersion getExtOrIntegerDefault("minSdkVersion")
     targetSdkVersion getExtOrIntegerDefault("targetSdkVersion")
     consumerProguardFiles "proguard-rules.pro"
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
     externalNativeBuild {
       cmake {
@@ -147,6 +148,8 @@ dependencies {
   implementation "androidx.media3:media3-datasource:${MEDIA3_VERSION}"
   implementation "androidx.media3:media3-exoplayer-hls:${MEDIA3_VERSION}"
   testImplementation "junit:junit:4.13.2"
+  androidTestImplementation "androidx.test:runner:1.6.2"
+  androidTestImplementation "androidx.test.ext:junit:1.2.1"
 }
 
 tasks.whenTaskAdded { task ->
