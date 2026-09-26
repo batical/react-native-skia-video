@@ -42,6 +42,12 @@ jobs:
       - name: Run unit tests
         run: yarn test --maxWorkers=2 --coverage
 
+      # The Android JVM tests run with the Android build, which has the SDK.
+      - name: Run native unit tests
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -Iios test/native/DecoderWindowTest.cpp -o "$RUNNER_TEMP/decoder-window"
+          "$RUNNER_TEMP/decoder-window"
+
   build-library:
     runs-on: ubuntu-latest
     steps:
