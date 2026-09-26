@@ -144,54 +144,62 @@ void VideoCompositionItemDecoder::advanceDecoder(CMTime currentTime) {
     CMTime duration = CMTimeMakeWithSeconds(item->duration, NSEC_PER_SEC);
     CMTime endTime = CMTimeAdd(startTime, duration);
 
+    // Reads the frames up to `until` into the queue.
+    auto decode = [&](std::list<std::pair<double, CMSampleBufferRef>>*
+                          framesQueue,
+                      CMTime until) {
+      CMTime latestSampleTime = kCMTimeInvalid;
+      if (framesQueue->size() > 0) {
+        latestSampleTime =
+            CMTimeMakeWithSeconds(framesQueue->back().first, NSEC_PER_SEC);
+      }
+      while (!CMTIME_IS_VALID(latestSampleTime) ||
+             (CMTimeCompare(latestSampleTime, until) < 0 &&
+              CMTimeCompare(endTime, until) >= 0)) {
+        if (assetReader.status != AVAssetReaderStatusReading) {
+          break;
+        }
+        AVAssetReaderOutput* assetReaderOutput =
+            [assetReader.outputs firstObject];
+        CMSampleBufferRef sampleBuffer =
+            [assetReaderOutput copyNextSampleBuffer];
+        if (!sampleBuffer) {
+          break;
+        }
+        if (CMSampleBufferGetNumSamples(sampleBuffer) == 0) {
+          CFRelease(sampleBuffer);
+          continue;
+        }
+        // Already in the presentation timeline: the track output applies the
+        // track's edits, a slow-motion clip's scaled ones and the offset of a
+        // file with reordered frames alike. Mapping it through the segments
+        // again showed every frame of such a file one frame early, and a
+        // slow-motion one slowed down twice.
+        auto timeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+        double targetSeconds = CMTimeGetSeconds(timeStamp);
+        auto buffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+        if (buffer) {
+          framesQueue->push_back(std::make_pair(targetSeconds, sampleBuffer));
+        } else {
+          CFRelease(sampleBuffer);
+        }
+
+        latestSampleTime = CMTimeMakeWithSeconds(targetSeconds, NSEC_PER_SEC);
+      }
+    };
+
     if (realTime && CMTimeCompare(endTime, inputPosition) < 0 && !hasLooped) {
+      // This pass is read to the item's end before the reader restarts for
+      // the next loop: the frames between the last position decoded and the
+      // end are still to be shown, and a seek into the last tenth of a second
+      // of the item lands on one of them. Dropping them left the frame from
+      // before such a seek on screen.
+      decode(&decodedFrames, endTime);
       setupReader(kCMTimeZero);
       hasLooped = true;
-      // we will loop so we want to decode the first frames of the next loop
-      inputPosition =
-          CMTimeAdd(position, CMTimeMakeWithSeconds(DECODER_INPUT_TIME_ADVANCE,
-                                                    NSEC_PER_SEC));
     }
-
-    auto framesQueue = hasLooped ? &nextLoopFrames : &decodedFrames;
-    CMTime latestSampleTime = kCMTimeInvalid;
-    if (framesQueue->size() > 0) {
-      latestSampleTime =
-          CMTimeMakeWithSeconds(framesQueue->back().first, NSEC_PER_SEC);
-    }
-
-    while (!CMTIME_IS_VALID(latestSampleTime) ||
-           (CMTimeCompare(latestSampleTime, inputPosition) < 0 &&
-            CMTimeCompare(endTime, inputPosition) >= 0)) {
-      if (assetReader.status != AVAssetReaderStatusReading) {
-        break;
-      }
-      AVAssetReaderOutput* assetReaderOutput =
-          [assetReader.outputs firstObject];
-      CMSampleBufferRef sampleBuffer = [assetReaderOutput copyNextSampleBuffer];
-      if (!sampleBuffer) {
-        break;
-      }
-      if (CMSampleBufferGetNumSamples(sampleBuffer) == 0) {
-        CFRelease(sampleBuffer);
-        continue;
-      }
-      // Already in the presentation timeline: the track output applies the
-      // track's edits, a slow-motion clip's scaled ones and the offset of a
-      // file with reordered frames alike. Mapping it through the segments
-      // again showed every frame of such a file one frame early, and a
-      // slow-motion one slowed down twice.
-      auto timeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
-      double targetSeconds = CMTimeGetSeconds(timeStamp);
-      auto buffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-      if (buffer) {
-        framesQueue->push_back(std::make_pair(targetSeconds, sampleBuffer));
-      } else {
-        CFRelease(sampleBuffer);
-      }
-
-      latestSampleTime = CMTimeMakeWithSeconds(targetSeconds, NSEC_PER_SEC);
-    }
+    // Once looped, the first frames of the next loop.
+    decode(hasLooped ? &nextLoopFrames : &decodedFrames, inputPosition);
   }
 }
 
