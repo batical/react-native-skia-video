@@ -44,6 +44,7 @@ VideoCompositionItemDecoder::VideoCompositionItemDecoder(
 }
 
 void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
+  readerGeneration++;
   NSError* error = nil;
   assetReader = [AVAssetReader assetReaderWithAsset:asset error:&error];
   if (error) {
@@ -130,77 +131,108 @@ void VideoCompositionItemDecoder::setupReader(CMTime initialTime) {
 #define DECODER_INPUT_TIME_ADVANCE 0.1
 
 
+using FrameQueue = std::list<std::pair<double, CMSampleBufferRef>>;
+
+// Reads `reader` past `latest` up to `until` into `out`. Touches no member, so
+// it can run without the decoder lock.
+static void readSamples(AVAssetReader* reader, CMTime latest, CMTime until,
+                        CMTime endTime, FrameQueue& out) {
+  CMTime latestSampleTime = latest;
+  while (!CMTIME_IS_VALID(latestSampleTime) ||
+         (CMTimeCompare(latestSampleTime, until) < 0 &&
+          CMTimeCompare(endTime, until) >= 0)) {
+    if (!reader || reader.status != AVAssetReaderStatusReading) {
+      break;
+    }
+    AVAssetReaderOutput* assetReaderOutput = [reader.outputs firstObject];
+    CMSampleBufferRef sampleBuffer = [assetReaderOutput copyNextSampleBuffer];
+    if (!sampleBuffer) {
+      break;
+    }
+    if (CMSampleBufferGetNumSamples(sampleBuffer) == 0) {
+      CFRelease(sampleBuffer);
+      continue;
+    }
+    // Already in the presentation timeline: the track output applies the
+    // track's edits, a slow-motion clip's scaled ones and the offset of a
+    // file with reordered frames alike. Mapping it through the segments
+    // again showed every frame of such a file one frame early, and a
+    // slow-motion one slowed down twice.
+    auto timeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+    double targetSeconds = CMTimeGetSeconds(timeStamp);
+    auto buffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+    if (buffer) {
+      out.push_back(std::make_pair(targetSeconds, sampleBuffer));
+    } else {
+      CFRelease(sampleBuffer);
+    }
+    latestSampleTime = CMTimeMakeWithSeconds(targetSeconds, NSEC_PER_SEC);
+  }
+}
+
+static CMTime lastSampleTime(const FrameQueue& queue) {
+  return queue.empty() ? kCMTimeInvalid
+                       : CMTimeMakeWithSeconds(queue.back().first, NSEC_PER_SEC);
+}
+
 void VideoCompositionItemDecoder::advanceDecoder(CMTime currentTime) {
+  AVAssetReader* reader = nil;
+  CMTime latest = kCMTimeInvalid;
+  CMTime inputPosition;
+  CMTime endTime;
+  bool intoNextLoop = false;
+  uint64_t batch = 0;
   @synchronized(lock) {
     CMTime startTime = CMTimeMakeWithSeconds(item->startTime, NSEC_PER_SEC);
     CMTime compositionStartTime =
         CMTimeMakeWithSeconds(item->compositionStartTime, NSEC_PER_SEC);
     CMTime position =
         CMTimeAdd(startTime, CMTimeSubtract(currentTime, compositionStartTime));
-    CMTime inputPosition =
+    inputPosition =
         realTime
             ? CMTimeAdd(position, CMTimeMakeWithSeconds(
                                       DECODER_INPUT_TIME_ADVANCE, NSEC_PER_SEC))
             : position;
     CMTime duration = CMTimeMakeWithSeconds(item->duration, NSEC_PER_SEC);
-    CMTime endTime = CMTimeAdd(startTime, duration);
-
-    // Reads the frames up to `until` into the queue.
-    auto decode = [&](std::list<std::pair<double, CMSampleBufferRef>>*
-                          framesQueue,
-                      CMTime until) {
-      CMTime latestSampleTime = kCMTimeInvalid;
-      if (framesQueue->size() > 0) {
-        latestSampleTime =
-            CMTimeMakeWithSeconds(framesQueue->back().first, NSEC_PER_SEC);
-      }
-      while (!CMTIME_IS_VALID(latestSampleTime) ||
-             (CMTimeCompare(latestSampleTime, until) < 0 &&
-              CMTimeCompare(endTime, until) >= 0)) {
-        if (assetReader.status != AVAssetReaderStatusReading) {
-          break;
-        }
-        AVAssetReaderOutput* assetReaderOutput =
-            [assetReader.outputs firstObject];
-        CMSampleBufferRef sampleBuffer =
-            [assetReaderOutput copyNextSampleBuffer];
-        if (!sampleBuffer) {
-          break;
-        }
-        if (CMSampleBufferGetNumSamples(sampleBuffer) == 0) {
-          CFRelease(sampleBuffer);
-          continue;
-        }
-        // Already in the presentation timeline: the track output applies the
-        // track's edits, a slow-motion clip's scaled ones and the offset of a
-        // file with reordered frames alike. Mapping it through the segments
-        // again showed every frame of such a file one frame early, and a
-        // slow-motion one slowed down twice.
-        auto timeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
-        double targetSeconds = CMTimeGetSeconds(timeStamp);
-        auto buffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-        if (buffer) {
-          framesQueue->push_back(std::make_pair(targetSeconds, sampleBuffer));
-        } else {
-          CFRelease(sampleBuffer);
-        }
-
-        latestSampleTime = CMTimeMakeWithSeconds(targetSeconds, NSEC_PER_SEC);
-      }
-    };
+    endTime = CMTimeAdd(startTime, duration);
 
     if (realTime && CMTimeCompare(endTime, inputPosition) < 0 && !hasLooped) {
       // This pass is read to the item's end before the reader restarts for
       // the next loop: the frames between the last position decoded and the
       // end are still to be shown, and a seek into the last tenth of a second
       // of the item lands on one of them. Dropping them left the frame from
-      // before such a seek on screen.
-      decode(&decodedFrames, endTime);
+      // before such a seek on screen. Under the lock: it replaces the reader,
+      // once per loop.
+      readSamples(assetReader, lastSampleTime(decodedFrames), endTime, endTime,
+                  decodedFrames);
       setupReader(kCMTimeZero);
       hasLooped = true;
     }
     // Once looped, the first frames of the next loop.
-    decode(hasLooped ? &nextLoopFrames : &decodedFrames, inputPosition);
+    intoNextLoop = hasLooped;
+    reader = assetReader;
+    latest = lastSampleTime(intoNextLoop ? nextLoopFrames : decodedFrames);
+    batch = readerGeneration;
+  }
+
+  // Decoded outside the lock: acquireFrameForTime takes it on the UI thread at
+  // every vsync, and a batch held it for the whole read (longer since frames
+  // are tone-mapped to Rec.709).
+  FrameQueue fresh;
+  readSamples(reader, latest, inputPosition, endTime, fresh);
+
+  @synchronized(lock) {
+    if (batch != readerGeneration || reader != assetReader) {
+      // A seek or a release replaced what this batch was read for.
+      for (const auto& frame : fresh) {
+        CFRelease(frame.second);
+      }
+    } else if (intoNextLoop && hasLooped) {
+      nextLoopFrames.splice(nextLoopFrames.end(), fresh);
+    } else {
+      // Or the loop wrapped meanwhile and the next loop's frames are current.
+      decodedFrames.splice(decodedFrames.end(), fresh);
+    }
   }
 }
 
@@ -302,6 +334,7 @@ void VideoCompositionItemDecoder::seekTo(CMTime currentTime) {
         CFRelease(frame.second);
       }
       decodedFrames.clear();
+      readerGeneration++;
       return;
     }
     // Not release(): that drops the frame ring too, and in direct mode the
@@ -329,6 +362,7 @@ void VideoCompositionItemDecoder::discardReader() {
     nextLoopFrames.clear();
     hasLooped = false;
     lastRequestedTime = kCMTimeInvalid;
+    readerGeneration++;
   }
 }
 

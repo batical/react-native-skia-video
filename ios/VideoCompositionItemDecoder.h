@@ -26,6 +26,9 @@ private:
   NSObject* lock;
   bool realTime = false;
   bool hasLooped = false;
+  // Bumped by every seek, release and new reader: a batch decoded outside
+  // the lock is kept only if none happened while it was read.
+  uint64_t readerGeneration = 0;
   std::shared_ptr<VideoCompositionItem> item;
   double width;
   double height;

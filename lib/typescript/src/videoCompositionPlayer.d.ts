@@ -1,5 +1,5 @@
 import type { SkImage } from '@shopify/react-native-skia';
-import { type DerivedValue } from 'react-native-reanimated';
+import { type DerivedValue, type SharedValue } from 'react-native-reanimated';
 import type { FrameDrawer, VideoComposition, VideoCompositionFramesExtractor } from './types.js';
 type UseVideoCompositionPlayerOptions<T = undefined> = {
     /**
@@ -44,9 +44,13 @@ type UseVideoCompositionPlayerOptions<T = undefined> = {
      * or the decoded frames change (a seek, the frame that follows it), which
      * saves GPU time and battery. Enable it if `drawFrame` depends on values
      * that change while paused, an overlay being dragged for instance.
+     *
+     * Or the shared values `drawFrame` reads: a paused player then redraws only
+     * when one of them is replaced, besides the time, the frames, the size or
+     * `drawFrame` itself. An idle editor stops redrawing at every vsync.
      * @default false
      */
-    drawWhenPaused?: boolean;
+    drawWhenPaused?: boolean | SharedValue<unknown>[];
     /**
      * Callback that is called when the composition is ready to play.
      */

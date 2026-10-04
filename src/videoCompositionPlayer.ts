@@ -5,6 +5,7 @@ import {
   useFrameCallback,
   runOnUI,
   type DerivedValue,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
@@ -59,9 +60,13 @@ type UseVideoCompositionPlayerOptions<T = undefined> = {
    * or the decoded frames change (a seek, the frame that follows it), which
    * saves GPU time and battery. Enable it if `drawFrame` depends on values
    * that change while paused, an overlay being dragged for instance.
+   *
+   * Or the shared values `drawFrame` reads: a paused player then redraws only
+   * when one of them is replaced, besides the time, the frames, the size or
+   * `drawFrame` itself. An idle editor stops redrawing at every vsync.
    * @default false
    */
-  drawWhenPaused?: boolean;
+  drawWhenPaused?: boolean | SharedValue<unknown>[];
   /**
    * Callback that is called when the composition is ready to play.
    */
@@ -180,6 +185,11 @@ export const useVideoCompositionPlayer = <T = undefined>({
   // redrawing an unchanged picture while paused.
   const lastDrawnFramesVersion = useSharedValue(-1);
   const lastDrawnTime = useSharedValue(-1);
+  const lastDrawnInputs = useSharedValue<unknown[] | null>(null);
+  // A new drawFrame can draw something else from the same time and frames.
+  useEffect(() => {
+    lastDrawnTime.value = -1;
+  }, [drawFrame, lastDrawnTime]);
   const pixelRatio = PixelRatio.get();
 
   // Release the offscreen surface with the hook that made it. Without this a
@@ -228,12 +238,29 @@ export const useVideoCompositionPlayer = <T = undefined>({
     const frames = framesExtractor.decodeCompositionFrames();
     const currentTime = framesExtractor.currentTime;
     const framesVersion = framesExtractor.framesVersion;
+    const inputs = Array.isArray(drawWhenPaused) ? drawWhenPaused : null;
+    let inputsSame = true;
+    if (inputs) {
+      const last = lastDrawnInputs.value;
+      if (!last || last.length !== inputs.length) inputsSame = false;
+      else {
+        for (let i = 0; i < inputs.length; i++) {
+          if (inputs[i]!.value !== last[i]) {
+            inputsSame = false;
+            break;
+          }
+        }
+      }
+    }
     if (
-      !drawWhenPaused &&
+      drawWhenPaused !== true &&
+      inputsSame &&
       !framesExtractor.isPlaying &&
       currentFrame.value !== null &&
       framesVersion === lastDrawnFramesVersion.value &&
-      currentTime === lastDrawnTime.value
+      currentTime === lastDrawnTime.value &&
+      surfaceWidth.value === pixelWidth &&
+      surfaceHeight.value === pixelHeight
     ) {
       // Paused with nothing new: the image on screen is still exact, and
       // redrawing it at every vsync would only burn GPU time and battery.
@@ -315,6 +342,7 @@ export const useVideoCompositionPlayer = <T = undefined>({
     }
     lastDrawnFramesVersion.value = framesVersion;
     lastDrawnTime.value = currentTime;
+    if (inputs) lastDrawnInputs.value = inputs.map((input) => input.value);
     afterDrawFrame?.(context);
   }, true);
 
